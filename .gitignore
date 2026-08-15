@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local environments
+.venv/
+venv/
+env/
+
+# Kaggle
+/kaggle/
+/content/
+
+# Large AI model files
+*.safetensors
+*.gguf
+*.ckpt
+*.pt
+*.pth
+*.bin
+
+# Generated video
+*.mp4
+*.mov
+*.webm
+*.avi
+
+# Outputs / cache
+outputs/
+output/
+cache/
+tmp/
+
+# ComfyUI runtime data
+ComfyUI/output/
+ComfyUI/temp/
+ComfyUI/input/
