@@ -1,0 +1,56 @@
+STORY PLANNING TEMPLATE
+
+Story title:
+[TITLE]
+
+Genre:
+[GENRE]
+
+Duration target:
+3–5 minutes
+
+Main characters:
+
+1. [CHARACTER NAME]
+   Role:
+   Personality:
+   Visual identity:
+
+2. [CHARACTER NAME]
+   Role:
+   Personality:
+   Visual identity:
+
+Story premise:
+
+[SHORT DESCRIPTION]
+
+Shot plan:
+
+SHOT 001
+Duration:
+Location:
+Characters:
+Action:
+Camera:
+Continuity notes:
+
+SHOT 002
+Duration:
+Location:
+Characters:
+Action:
+Camera:
+Continuity notes:
+
+SHOT 003
+Duration:
+Location:
+Characters:
+Action:
+Camera:
+Continuity notes:
+
+Continue creating shots until the complete story is covered.
+
+Each shot should have a clear relationship with the previous and next shot.
