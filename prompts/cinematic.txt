@@ -1,0 +1,37 @@
+CINEMATIC PROMPT TEMPLATE
+
+Subject:
+[MAIN SUBJECT]
+
+Action:
+[WHAT IS HAPPENING]
+
+Location:
+[ENVIRONMENT]
+
+Time:
+[TIME OF DAY]
+
+Camera shot:
+[CLOSE-UP / MEDIUM / WIDE / AERIAL]
+
+Camera movement:
+[STATIC / DOLLY / PAN / TRACKING / CRANE]
+
+Lighting:
+[LIGHTING DESCRIPTION]
+
+Mood:
+[EMOTIONAL ATMOSPHERE]
+
+Visual style:
+[CINEMATIC STYLE]
+
+Detail:
+High visual detail, natural textures, realistic materials,
+consistent subject appearance, coherent environment,
+cinematic composition, controlled lighting.
+
+Motion:
+Natural movement, physically believable motion,
+stable subject identity, coherent temporal motion.
