@@ -23,11 +23,15 @@ class CharacterPlanner:
 
     def __init__(self):
 
-        self.model = QwenStoryModel()
+    self.model = QwenStoryModel()
 
         self.references = (
             ReferenceManager()
-        )
+            )
+    
+            self.references = (
+                ReferenceManager()
+            )
 
     def create_character_plan(
         self,
