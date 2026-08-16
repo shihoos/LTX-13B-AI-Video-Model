@@ -339,9 +339,10 @@ def ensure_comfy_runtime_dependencies():
     import importlib.util
 
     module_to_package = {
-        "comfy_aimdo": "comfy-aimdo",
-        "comfy_kitchen": "comfy-kitchen",
-        "torchsde": "torchsde",
+    "comfy_aimdo": "comfy-aimdo",
+    "comfy_kitchen": "comfy-kitchen",
+    "torchsde": "torchsde",
+    "av": "av",
     }
 
     missing_packages = []
