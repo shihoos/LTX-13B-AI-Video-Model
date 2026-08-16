@@ -18,26 +18,32 @@ CUSTOM = COMFY / "custom_nodes"
 
 
 # ============================================================
-# VERSION-PINNED ENVIRONMENT
+# VERIFIED VERSION PINS
 # ============================================================
 
-# This is the ComfyUI version currently confirmed working
-# in your Kaggle environment.
+# Official recovered LTX 0.9.8 workflow metadata:
+# comfy-core 0.3.30
+#
+# Full commit SHA resolved from tag v0.3.30.
 COMFY_REPO = (
     "https://github.com/Comfy-Org/ComfyUI.git"
 )
 
-COMFY_COMMIT = "38d049382533c6662d815b08ca3395e96cca9f57"
+COMFY_COMMIT = (
+    "a97f2f850abd7dd330e6363c8d8074bb243eb413"
+)
 
 
-# Verified LTXVideo revision containing:
-# - LTXVLatentUpsamplerModelLoader
-# - LTXVLatentUpsampler
-# - STGGuiderAdvanced
-# - LTXVBaseSampler
-# - LTXVAdainLatent
+# Verified LTXVideo revision containing the required
+# LTX 0.9.8 nodes and STG pipeline.
 LTXVIDEO_COMMIT = (
     "ee11be3ce229c3afd5fadf8a1258eb8b84af33b1"
+)
+
+
+# Verified KJNodes 1.0.8 revision.
+KJNODES_COMMIT = (
+    "89fb17ae84951995ab1eee19e205ea48ceed27c9"
 )
 
 
@@ -75,7 +81,7 @@ NODES = {
     "ComfyUI-KJNodes": {
         "url":
             "https://github.com/kijai/ComfyUI-KJNodes.git",
-        "commit": None,
+        "commit": KJNODES_COMMIT,
     },
 }
 
@@ -103,6 +109,7 @@ FORBIDDEN_PACKAGES = {
 # ============================================================
 
 def run(command, cwd=None):
+
     print(
         "\n$ " +
         " ".join(
@@ -121,9 +128,8 @@ def run(command, cwd=None):
 # GIT HELPERS
 # ============================================================
 
-def get_current_commit(
-    repository: Path,
-):
+def get_current_commit(repository: Path) -> str:
+
     result = subprocess.run(
         [
             "git",
@@ -140,21 +146,24 @@ def get_current_commit(
     return result.stdout.strip()
 
 
+def repository_is_git(repository: Path) -> bool:
+
+    return (
+        (repository / ".git").exists()
+    )
+
+
 def checkout_pinned_commit(
     repository: Path,
     commit: str,
 ):
-    """
-    Deterministically switch an existing repository to
-    an exact revision.
-
-    No shallow-depth assumptions are used.
-    """
 
     print(
         f"\nPinning repository to: {commit}"
     )
 
+    # Full history is deliberately used for pinned
+    # historical revisions.
     run(
         [
             "git",
@@ -166,6 +175,8 @@ def checkout_pinned_commit(
         cwd=repository,
     )
 
+    # Force checkout so stale working-tree state can never
+    # prevent the pinned revision from being selected.
     run(
         [
             "git",
@@ -181,6 +192,7 @@ def checkout_pinned_commit(
     )
 
     if actual != commit:
+
         raise RuntimeError(
             "\nRepository pin verification failed.\n"
             f"Expected: {commit}\n"
@@ -197,34 +209,24 @@ def clone_repo(
     destination: Path,
     commit: str | None = None,
 ):
-    """
-    Clone a repository or update an existing repository.
-
-    When a commit is supplied, the exact commit is checked
-    out using full Git history. No --depth-based checkout
-    is used for pinned repositories.
-    """
 
     # --------------------------------------------------------
-    # Existing directory
+    # Existing repository
     # --------------------------------------------------------
 
     if destination.exists():
 
-        git_dir = (
-            destination / ".git"
-        )
-
-        if git_dir.exists():
+        if repository_is_git(
+            destination
+        ):
 
             print(
                 f"\nRepository already exists:"
                 f" {destination}"
             )
 
-            # A pinned repository must be moved to the
-            # requested exact revision.
             if commit:
+
                 checkout_pinned_commit(
                     destination,
                     commit,
@@ -232,7 +234,7 @@ def clone_repo(
 
             return
 
-        # Directory exists but is not a Git repository.
+        # Directory exists but isn't a Git repository.
         print(
             "\nRemoving incomplete repository:"
             f" {destination}"
@@ -255,8 +257,8 @@ def clone_repo(
         f"\nCloning repository:\n{url}"
     )
 
-    # Full clone deliberately used here because we may need
-    # an historical pinned commit.
+    # Full clone is intentional for pinned historical
+    # revisions.
     run(
         [
             "git",
@@ -266,11 +268,8 @@ def clone_repo(
         ]
     )
 
-    # --------------------------------------------------------
-    # Pin exact revision
-    # --------------------------------------------------------
-
     if commit:
+
         checkout_pinned_commit(
             destination,
             commit,
@@ -278,15 +277,17 @@ def clone_repo(
 
 
 # ============================================================
-# PYTORCH VERIFICATION
+# PYTORCH / CUDA VERIFICATION
 # ============================================================
 
 def verify_torch():
 
     try:
+
         import torch
 
     except ImportError as exc:
+
         raise RuntimeError(
             "PyTorch is not installed."
         ) from exc
@@ -294,9 +295,11 @@ def verify_torch():
     print(
         "\n" + "=" * 70
     )
+
     print(
         "PYTORCH / CUDA VERIFICATION"
     )
+
     print(
         "=" * 70
     )
@@ -366,10 +369,6 @@ def filter_requirements(
     source: Path,
     destination: Path,
 ):
-    """
-    Remove packages that are not allowed to replace
-    the known-good Torch environment.
-    """
 
     filtered = []
 
@@ -464,12 +463,13 @@ def install_comfy_dependencies():
 
     try:
         filtered.unlink()
+
     except OSError:
         pass
 
 
 # ============================================================
-# CUSTOM NODE DEPENDENCIES
+# CUSTOM-NODE DEPENDENCIES
 # ============================================================
 
 def install_node_dependencies():
@@ -477,9 +477,11 @@ def install_node_dependencies():
     print(
         "\n" + "=" * 70
     )
+
     print(
         "CUSTOM NODE DEPENDENCIES"
     )
+
     print(
         "=" * 70
     )
@@ -526,6 +528,7 @@ def install_node_dependencies():
 
             try:
                 filtered.unlink()
+
             except OSError:
                 pass
 
@@ -549,8 +552,209 @@ def install_node_dependencies():
 
         try:
             filtered.unlink()
+
         except OSError:
             pass
+
+
+# ============================================================
+# SOURCE COMPATIBILITY VERIFICATION
+# ============================================================
+
+def verify_ltx_source_compatibility():
+
+    print(
+        "\n" + "=" * 70
+    )
+
+    print(
+        "VERIFYING LTX / COMFYUI SOURCE COMPATIBILITY"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    # --------------------------------------------------------
+    # Read the exact imports required by our pinned LTXVideo.
+    # --------------------------------------------------------
+
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(CUSTOM / "ComfyUI-LTXVideo"),
+            "show",
+            (
+                f"{LTXVIDEO_COMMIT}:"
+                "tricks/modules/ltx_model.py"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    ltx_source = result.stdout
+
+    required = [
+        "BasicTransformerBlock",
+        "LTXVModel",
+        "apply_rotary_emb",
+        "precompute_freqs_cis",
+    ]
+
+    # --------------------------------------------------------
+    # Read pinned ComfyUI Lightricks model.
+    # --------------------------------------------------------
+
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(COMFY),
+            "show",
+            (
+                f"{COMFY_COMMIT}:"
+                "comfy/ldm/lightricks/model.py"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    comfy_source = result.stdout
+
+    print(
+        "\nRequired LTXVideo symbols:"
+    )
+
+    for symbol in required:
+
+        present = symbol in comfy_source
+
+        print(
+            f"{symbol:35}"
+            f"{'✅' if present else '❌'}"
+        )
+
+        if not present:
+
+            raise RuntimeError(
+                "\nLTXVideo / ComfyUI source "
+                "compatibility check failed.\n"
+                f"Missing: {symbol}"
+            )
+
+    print(
+        "\n✅ LTXVideo ↔ ComfyUI API compatibility verified."
+    )
+
+
+# ============================================================
+# KJ NODES SOURCE VERIFICATION
+# ============================================================
+
+def verify_kjnodes_source():
+
+    print(
+        "\n" + "=" * 70
+    )
+
+    print(
+        "VERIFYING KJ NODES 1.0.8"
+    )
+
+    print(
+        "=" * 70
+    )
+
+    repository = (
+        CUSTOM /
+        "ComfyUI-KJNodes"
+    )
+
+    required_nodes = [
+        "StringToFloatList",
+        "FloatToSigmas",
+        "ImageResizeKJ",
+    ]
+
+    python_files = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            KJNODES_COMMIT,
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+
+    python_files = [
+        path
+        for path in python_files
+        if path.endswith(".py")
+    ]
+
+    combined = ""
+
+    for path in python_files:
+
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repository),
+                "show",
+                f"{KJNODES_COMMIT}:{path}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode == 0:
+            combined += (
+                "\n" +
+                result.stdout
+            )
+
+    for node in required_nodes:
+
+        if node not in combined:
+
+            raise RuntimeError(
+                "\nRequired KJNodes node missing:\n"
+                f"{node}"
+            )
+
+        print(
+            f"{node:30} ✅"
+        )
+
+    breaking = (
+        "_append_guide_attention_entry"
+    )
+
+    if breaking in combined:
+
+        raise RuntimeError(
+            "\nIncompatible KJNodes API detected:\n"
+            f"{breaking}"
+        )
+
+    print(
+        f"{breaking:30} ✅ absent"
+    )
+
+    print(
+        "\n✅ KJNodes 1.0.8 source verified."
+    )
 
 
 # ============================================================
@@ -562,9 +766,11 @@ def validate_repositories():
     print(
         "\n" + "=" * 70
     )
+
     print(
         "VALIDATING REPOSITORIES"
     )
+
     print(
         "=" * 70
     )
@@ -588,9 +794,16 @@ def validate_repositories():
         )
     )
 
+    if comfy_revision != COMFY_COMMIT:
+
+        raise RuntimeError(
+            "\nComfyUI revision mismatch.\n"
+            f"Expected: {COMFY_COMMIT}\n"
+            f"Found:    {comfy_revision}"
+        )
+
     print(
-        "ComfyUI:",
-        comfy_revision,
+        f"ComfyUI: {comfy_revision} ✅"
     )
 
     # --------------------------------------------------------
@@ -629,18 +842,20 @@ def validate_repositories():
                 )
 
             print(
-                f"{name}: {revision} ✅"
+                f"{name}: "
+                f"{revision} ✅"
             )
 
         else:
 
             print(
-                f"{name}: {revision}"
+                f"{name}: "
+                f"{revision}"
             )
 
 
 # ============================================================
-# VALIDATE COMFYUI FILES
+# VALIDATE FILESYSTEM
 # ============================================================
 
 def validate_comfy():
@@ -648,9 +863,11 @@ def validate_comfy():
     print(
         "\n" + "=" * 70
     )
+
     print(
         "VALIDATING COMFYUI INSTALLATION"
     )
+
     print(
         "=" * 70
     )
@@ -658,11 +875,21 @@ def validate_comfy():
     required_files = [
         COMFY / "main.py",
         COMFY / "requirements.txt",
-        CUSTOM / "ComfyUI-GGUF",
-        CUSTOM / "ComfyUI-LTXVideo",
-        CUSTOM / "ComfyUI-VideoHelperSuite",
-        CUSTOM / "rgthree-comfy",
-        CUSTOM / "ComfyUI-KJNodes",
+
+        CUSTOM /
+        "ComfyUI-GGUF",
+
+        CUSTOM /
+        "ComfyUI-LTXVideo",
+
+        CUSTOM /
+        "ComfyUI-VideoHelperSuite",
+
+        CUSTOM /
+        "rgthree-comfy",
+
+        CUSTOM /
+        "ComfyUI-KJNodes",
     ]
 
     for path in required_files:
@@ -702,7 +929,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # 1. Verify the known-good Torch environment
+    # 1. GPU / Torch verification
     # --------------------------------------------------------
 
     verify_torch()
@@ -722,7 +949,7 @@ def main():
     )
 
     # --------------------------------------------------------
-    # 3. Create custom-node directory
+    # 3. Custom nodes directory
     # --------------------------------------------------------
 
     CUSTOM.mkdir(
@@ -747,13 +974,13 @@ def main():
         )
 
     # --------------------------------------------------------
-    # 5. Install ComfyUI dependencies safely
+    # 5. Install ComfyUI dependencies
     # --------------------------------------------------------
 
     install_comfy_dependencies()
 
     # --------------------------------------------------------
-    # 6. Install custom-node dependencies safely
+    # 6. Install custom-node dependencies
     # --------------------------------------------------------
 
     install_node_dependencies()
@@ -765,13 +992,21 @@ def main():
     validate_comfy()
 
     # --------------------------------------------------------
-    # 8. Validate exact Git revisions
+    # 8. Validate Git revisions
     # --------------------------------------------------------
 
     validate_repositories()
 
     # --------------------------------------------------------
-    # 9. Verify Torch again
+    # 9. Verify actual source compatibility
+    # --------------------------------------------------------
+
+    verify_ltx_source_compatibility()
+
+    verify_kjnodes_source()
+
+    # --------------------------------------------------------
+    # 10. Verify Torch again
     # --------------------------------------------------------
 
     verify_torch()
@@ -790,4 +1025,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
