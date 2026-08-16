@@ -19,10 +19,10 @@ The script will:
 2. Download cloudflared if necessary.
 3. Make cloudflared executable.
 4. Start ComfyUI in the background.
-5. Wait until port 8188 is actually accepting connections.
+5. Wait until port 8188 is accepting connections.
 6. Start the Cloudflare tunnel.
 7. Print the public URL.
-8. Keep both processes alive until the cell is stopped.
+8. Keep both processes alive until stopped.
 """
 
 from pathlib import Path
@@ -83,7 +83,7 @@ TUNNEL_URL_PATTERN = re.compile(
 
 
 # ============================================================
-# PROCESS OUTPUT READER
+# PROCESS OUTPUT
 # ============================================================
 
 def stream_output(
@@ -91,10 +91,7 @@ def stream_output(
     prefix,
     output_queue=None,
 ):
-    """
-    Drain a subprocess stdout continuously so the child
-    process cannot block because its output pipe is full.
-    """
+    """Continuously drain subprocess output."""
 
     if process.stdout is None:
         return
@@ -119,7 +116,7 @@ def stream_output(
 
     except Exception as exc:
         print(
-            f"{prefix} output reader error: {exc}",
+            f"{prefix} output error: {exc}",
             flush=True,
         )
 
@@ -129,9 +126,7 @@ def stream_output(
 # ============================================================
 
 def ensure_cloudflared():
-    """
-    Download cloudflared once and always ensure it is executable.
-    """
+    """Download cloudflared and ensure it is executable."""
 
     if not CLOUDFLARED_PATH.exists():
 
@@ -148,7 +143,8 @@ def ensure_cloudflared():
             "✅ cloudflared downloaded"
         )
 
-    # Kaggle may restore the file without its executable bit.
+    # Always restore execute permission.
+    # Kaggle/persistent files may lose the executable bit.
     os.chmod(
         CLOUDFLARED_PATH,
         0o755,
@@ -170,7 +166,7 @@ def ensure_cloudflared():
 
 
 # ============================================================
-# COMFYUI CHECK
+# COMFYUI
 # ============================================================
 
 def verify_comfyui():
@@ -184,13 +180,9 @@ def verify_comfyui():
         raise FileNotFoundError(
             "ComfyUI was not found at:\n"
             f"{COMFYUI_DIR}\n\n"
-            "Run the project bootstrap first."
+            "Run bootstrap.py first."
         )
 
-
-# ============================================================
-# START COMFYUI
-# ============================================================
 
 def start_comfyui():
 
@@ -276,7 +268,6 @@ def wait_for_comfyui(
         < timeout
     ):
 
-        # ComfyUI died before opening the port.
         return_code = process.poll()
 
         if return_code is not None:
@@ -308,7 +299,7 @@ def wait_for_comfyui(
 
 
 # ============================================================
-# START CLOUDFLARE
+# CLOUDFLARE TUNNEL
 # ============================================================
 
 def start_tunnel():
@@ -351,7 +342,7 @@ def start_tunnel():
 
 
 # ============================================================
-# GET TUNNEL URL
+# TUNNEL URL
 # ============================================================
 
 def wait_for_tunnel_url(
@@ -360,7 +351,6 @@ def wait_for_tunnel_url(
     timeout=60,
 ):
 
-    print()
     print(
         "Waiting for Cloudflare tunnel URL..."
     )
@@ -473,7 +463,7 @@ def main():
         comfy_process = start_comfyui()
 
         # ----------------------------------------------------
-        # 3. Wait for real port readiness
+        # 3. Wait for real readiness
         # ----------------------------------------------------
 
         wait_for_comfyui(
@@ -481,7 +471,8 @@ def main():
         )
 
         # ----------------------------------------------------
-        # 4. Start tunnel ONLY after ComfyUI works
+        # 4. Start Cloudflare only after
+        #    ComfyUI is confirmed ready.
         # ----------------------------------------------------
 
         (
@@ -490,7 +481,7 @@ def main():
         ) = start_tunnel()
 
         # ----------------------------------------------------
-        # 5. Obtain public URL
+        # 5. Get public URL
         # ----------------------------------------------------
 
         url = wait_for_tunnel_url(
@@ -500,9 +491,7 @@ def main():
 
         print()
         print("=" * 70)
-        print(
-            "✅ COMFYUI IS READY"
-        )
+        print("✅ COMFYUI IS READY")
         print("=" * 70)
         print()
         print(
@@ -570,4 +559,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
