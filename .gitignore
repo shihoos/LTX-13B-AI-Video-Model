@@ -1,118 +1,61 @@
-# ============================================================
-
 # Python
-
-# ============================================================
-
-**pycache**/
+__pycache__/
 *.py[cod]
-*$py.class
-*.so
-*.egg-info/
-build/
-dist/
+*.pyo
 
-# ============================================================
-
-# Virtual environments
-
-# ============================================================
-
+# Environment
 .venv/
 venv/
 env/
-
-# ============================================================
-
-# Jupyter / Kaggle
-
-# ============================================================
-
-.ipynb_checkpoints/
-*.ipynb_checkpoints
-
-# ============================================================
-
-# Environment / secrets
-
-# ============================================================
-
 .env
-.env.*
-*.key
-*.pem
-secrets/
-credentials/
 
-# ============================================================
+# Python caches
+.pytest_cache/
+.mypy_cache/
 
-# AI model files
+# Jupyter
+.ipynb_checkpoints/
 
-# These must remain in Kaggle datasets, never GitHub.
-
-# ============================================================
-
+# Large AI models
+models/
 *.safetensors
-*.gguf
 *.ckpt
 *.pt
 *.pth
-*.bin
+*.gguf
 
-# ============================================================
+# Generated data
+data/stories/*.json
+data/characters/*.json
+data/scenes/*.json
+data/shots/*.json
 
-# Generated videos
+# Generated video
+output/raw/*
+!output/raw/.gitkeep
 
-# ============================================================
+output/detailed/*
+!output/detailed/.gitkeep
 
-*.mp4
-*.mov
-*.webm
-*.avi
-*.mkv
+output/upscaled/*
+!output/upscaled/.gitkeep
 
-# ============================================================
+output/final/*
+!output/final/.gitkeep
 
-# Generated images
+# Optional user assets
+assets/characters/*
+!assets/characters/.gitkeep
 
-# ============================================================
+assets/references/*
+!assets/references/.gitkeep
 
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.webp
+assets/audio/*
+!assets/audio/.gitkeep
 
-# ============================================================
+assets/music/*
+!assets/music/.gitkeep
 
-# Runtime output / cache
-
-# ============================================================
-
-outputs/
-output/
-cache/
-tmp/
+# Logs
+*.log
 logs/
-
-# ============================================================
-
-# ComfyUI runtime directories
-
-# ============================================================
-
-ComfyUI/output/
-ComfyUI/temp/
-ComfyUI/input/
-ComfyUI/models/
-
-# ============================================================
-
-# OS / editor files
-
-# ============================================================
-
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
