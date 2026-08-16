@@ -330,9 +330,9 @@ def start_tunnel():
 
 def ensure_comfy_runtime_dependencies():
     """
-    Install missing runtime dependencies required by the
-    installed ComfyUI version without replacing the
-    known-good Torch/CUDA installation.
+    Install runtime dependencies required by the installed
+    ComfyUI version without replacing the known-good
+    Torch/CUDA environment.
     """
 
     import importlib.util
@@ -350,20 +350,57 @@ def ensure_comfy_runtime_dependencies():
         if importlib.util.find_spec(module_name) is None:
             missing_modules.append(module_name)
 
-    if not missing_modules:
+    # --------------------------------------------------------
+    # Check ComfyUI frontend separately.
+    # The frontend is a pip package and may not correspond
+    # directly to a Python importable module name.
+    # --------------------------------------------------------
+
+    frontend_package = (
+        "comfyui-frontend-package"
+    )
+
+    frontend_check = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "show",
+            frontend_package,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+    frontend_missing = (
+        frontend_check.returncode != 0
+    )
+
+    if (
+        not missing_modules
+        and not frontend_missing
+    ):
         print(
             "✅ ComfyUI runtime dependencies are present."
         )
         return
 
-    requirements = COMFY / "requirements.txt"
+    requirements = (
+        COMFY / "requirements.txt"
+    )
 
     if not requirements.exists():
         raise FileNotFoundError(
-            f"ComfyUI requirements file not found:\n{requirements}"
+            f"ComfyUI requirements file not found:\n"
+            f"{requirements}"
         )
 
-    # Read the exact versions requested by this ComfyUI checkout.
+    # --------------------------------------------------------
+    # Read exact package versions requested by this
+    # ComfyUI checkout.
+    # --------------------------------------------------------
+
     package_lookup = {}
 
     for line in requirements.read_text(
@@ -372,7 +409,10 @@ def ensure_comfy_runtime_dependencies():
 
         line = line.strip()
 
-        if not line or line.startswith("#"):
+        if (
+            not line
+            or line.startswith("#")
+        ):
             continue
 
         normalized = (
@@ -390,11 +430,17 @@ def ensure_comfy_runtime_dependencies():
 
     packages = []
 
+    # --------------------------------------------------------
+    # Missing Python modules
+    # --------------------------------------------------------
+
     for module_name in missing_modules:
 
-        package_name = module_to_package[
-            module_name
-        ]
+        package_name = (
+            module_to_package[
+                module_name
+            ]
+        )
 
         requirement = package_lookup.get(
             package_name.lower(),
@@ -403,6 +449,26 @@ def ensure_comfy_runtime_dependencies():
 
         packages.append(requirement)
 
+    # --------------------------------------------------------
+    # Missing ComfyUI frontend
+    # --------------------------------------------------------
+
+    if frontend_missing:
+
+        frontend_requirement = package_lookup.get(
+            frontend_package,
+            frontend_package,
+        )
+
+        packages.append(
+            frontend_requirement
+        )
+
+    # Remove duplicates while preserving order.
+    packages = list(
+        dict.fromkeys(packages)
+    )
+
     print()
     print("=" * 70)
     print(
@@ -410,10 +476,17 @@ def ensure_comfy_runtime_dependencies():
     )
     print("=" * 70)
 
-    print(
-        "Missing modules:",
-        missing_modules,
-    )
+    if missing_modules:
+        print(
+            "Missing modules:",
+            missing_modules,
+        )
+
+    if frontend_missing:
+        print(
+            "Missing package:",
+            frontend_package,
+        )
 
     print(
         "Installing:",
@@ -434,7 +507,7 @@ def ensure_comfy_runtime_dependencies():
     print(
         "✅ Missing ComfyUI runtime dependencies installed."
     )
-
+    
 def main():
 
     print()
