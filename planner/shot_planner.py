@@ -22,12 +22,23 @@ class ShotPlanner:
         self.model = QwenStoryModel()
 
     def create_shot_plan(
-        self,
-        story: str,
-        characters: list,
-        scene,
-        continuity_context: str = "",
-    ) -> list:
+            self,
+            story: str,
+            characters: list,
+            scene,
+            continuity_context = (
+        continuity_manager.build_context(
+            previous_shot
+        )
+    )
+
+    shots = shot_planner.create_shot_plan(
+    story=story,
+    characters=characters,
+    scene=scene,
+    continuity_context=continuity_context,
+    )
+) -> list:
 
         project_root = (
             Path(__file__)
