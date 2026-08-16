@@ -1,11 +1,21 @@
 import json
 
+from pathlib import Path
+
 from planner.qwen_loader import (
     QwenStoryModel,
 )
 
 from pipeline.reference_manager import (
     ReferenceManager,
+)
+
+from schemas.character import (
+    Character,
+)
+
+from schemas.parser import (
+    extract_json,
 )
 
 
@@ -23,9 +33,7 @@ class CharacterPlanner:
         self,
         story: str,
         character_names: list,
-    ) -> str:
-
-        from pathlib import Path
+    ) -> list:
 
         project_root = (
             Path(__file__)
@@ -65,8 +73,9 @@ class CharacterPlanner:
             {
                 "role": "system",
                 "content": (
-                    "Return a structured character "
-                    "production plan."
+                    "You are a cinematic character "
+                    "planning system. Return only "
+                    "valid JSON."
                 ),
             },
             {
@@ -75,9 +84,82 @@ class CharacterPlanner:
             },
         ]
 
-        return self.model.generate(
+        response = self.model.generate(
             messages
         )
+
+        data = extract_json(
+            response
+        )
+
+        characters = []
+
+        for item in data.get(
+            "characters",
+            [],
+        ):
+
+            name = item.get(
+                "name",
+                "",
+            )
+
+            reference = reference_data.get(
+                name,
+            )
+
+            if reference is None:
+
+                reference = self.references.get_character_source(
+                    name
+                )
+
+            characters.append(
+                Character(
+                    character_id=item.get(
+                        "character_id",
+                        f"character_{len(characters) + 1:03d}",
+                    ),
+                    name=name,
+                    role=item.get(
+                        "role",
+                        "",
+                    ),
+                    description=item.get(
+                        "description",
+                        "",
+                    ),
+                    personality=item.get(
+                        "personality",
+                        "",
+                    ),
+                    appearance=item.get(
+                        "appearance",
+                        {},
+                    ),
+                    clothing=item.get(
+                        "clothing",
+                        {},
+                    ),
+                    distinctive_features=item.get(
+                        "distinctive_features",
+                        [],
+                    ),
+                    reference_mode=reference.get(
+                        "mode",
+                        "auto",
+                    ),
+                    reference_path=reference.get(
+                        "path",
+                    ),
+                    continuity_rules=item.get(
+                        "continuity_rules",
+                        [],
+                    ),
+                )
+            )
+
+        return characters
 
     def unload(self):
 
