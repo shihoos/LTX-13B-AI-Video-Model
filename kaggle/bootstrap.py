@@ -23,11 +23,11 @@ VENV = PROJECT / ".venv"
 
 # ComfyUI state from the LTXV 0.9.8 timeframe.
 COMFY_REPO = "https://github.com/Comfy-Org/ComfyUI.git"
-COMFY_COMMIT = "9bc2798"
+COMFY_COMMIT = None
 
 # LTXVideo state corresponding to the 0.9.8 release.
 LTX_REPO = "https://github.com/Lightricks/ComfyUI-LTXVideo.git"
-LTX_COMMIT = "36fdaf5"
+LTX_COMMIT = None
 
 
 # ============================================================
