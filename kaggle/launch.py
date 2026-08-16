@@ -327,7 +327,95 @@ def start_tunnel():
             str(TUNNEL),
         ]
     )
+    
+def ensure_comfy_runtime_dependencies():
+    """
+    Ensure runtime packages required by the installed ComfyUI
+    version are available, without modifying Torch/CUDA.
+    """
 
+    import importlib.util
+
+    missing = []
+
+    if importlib.util.find_spec("comfy_aimdo") is None:
+        missing.append("comfy_aimdo")
+
+    if importlib.util.find_spec("comfy_kitchen") is None:
+        missing.append("comfy-kitchen")
+
+    if not missing:
+        print("✅ ComfyUI runtime dependencies are present.")
+        return
+
+    print()
+    print("=" * 70)
+    print("INSTALLING MISSING COMFYUI RUNTIME DEPENDENCIES")
+    print("=" * 70)
+
+    requirements = COMFY / "requirements.txt"
+
+    if not requirements.exists():
+        raise FileNotFoundError(
+            f"ComfyUI requirements file not found:\n{requirements}"
+        )
+
+    lines = requirements.read_text(
+        encoding="utf-8"
+    ).splitlines()
+
+    runtime_requirements = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        package_name = (
+            stripped
+            .split("==")[0]
+            .split(">=")[0]
+            .split("<=")[0]
+            .split(">")[0]
+            .split("<")[0]
+            .strip()
+            .lower()
+        )
+
+        if package_name in {
+            "comfy-aimdo",
+            "comfy-kitchen",
+        }:
+            runtime_requirements.append(
+                stripped
+            )
+
+    if not runtime_requirements:
+        raise RuntimeError(
+            "Could not find comfy-aimdo/comfy-kitchen "
+            "requirements in ComfyUI requirements.txt."
+        )
+
+    print(
+        "Installing:",
+        runtime_requirements,
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            *runtime_requirements,
+        ],
+        check=True,
+    )
+
+    print(
+        "✅ ComfyUI runtime dependencies installed."
+    )
 
 def main():
 
@@ -347,6 +435,8 @@ def main():
 
     ensure_comfyui()
 
+    ensure_comfy_runtime_dependencies()
+    
     models = find_all_models()
 
     create_model_paths(
