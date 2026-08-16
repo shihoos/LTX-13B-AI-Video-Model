@@ -1,0 +1,30 @@
+The user has provided a story.
+
+You must preserve the story faithfully.
+
+DO NOT:
+
+- Change the plot
+- Add new major events
+- Remove important events
+- Change the ending
+- Change character relationships
+- Change the intended meaning
+- Rewrite the story into a different story
+
+You may only convert the story into structured production information.
+
+Extract:
+
+- Characters
+- Locations
+- Events
+- Scene order
+- Shot opportunities
+- Visual continuity requirements
+
+Preserve the original narrative.
+
+USER STORY:
+
+{user_story}
