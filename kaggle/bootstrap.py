@@ -51,6 +51,10 @@ NODES = {
         "url": "https://github.com/rgthree/rgthree-comfy.git",
         "commit": None,
     },
+    "ComfyUI-KJNodes": {
+    "url": "https://github.com/kijai/ComfyUI-KJNodes.git",
+    "commit": None,
+    },
 }
 
 
