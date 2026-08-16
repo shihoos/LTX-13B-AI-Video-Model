@@ -750,41 +750,103 @@ def patch_ltx_kornia_compatibility():
 
     print()
     print("=" * 70)
-    print(
-        "CHECKING LTXVIDEO / KORNIA COMPATIBILITY"
-    )
+    print("CHECKING LTXVIDEO / KORNIA COMPATIBILITY")
     print("=" * 70)
 
-    ltx_file = (
+    pyramid_file = (
         COMFY
         / "custom_nodes"
         / "ComfyUI-LTXVideo"
         / "pyramid_blending.py"
     )
 
-    if not ltx_file.exists():
-
-        raise FileNotFoundError(
-            "LTXVideo pyramid_blending.py "
-            "was not found:\n"
-            f"{ltx_file}"
-        )
-
-    text = ltx_file.read_text(
-        encoding="utf-8"
-    )
-
-    # --------------------------------------------------------
-    # Already patched
-    # --------------------------------------------------------
-
-    if "pad = F.pad" in text:
+    # The pinned LTX 0.9.8-era revision does not contain
+    # the modern pyramid_blending.py module.
+    #
+    # Therefore there is nothing to patch.
+    if not pyramid_file.exists():
 
         print(
-            "✅ LTXVideo/Kornia patch already applied."
+            "✅ No pyramid_blending.py in the pinned "
+            "LTXVideo revision."
+        )
+
+        print(
+            "✅ Kornia compatibility patch not required."
         )
 
         return
+
+    print(
+        f"Found:\n{pyramid_file}"
+    )
+
+    # --------------------------------------------------------
+    # Modern LTXVideo compatibility patch
+    # --------------------------------------------------------
+
+    text = pyramid_file.read_text(
+        encoding="utf-8"
+    )
+
+    original = text
+
+    # Remove the obsolete Kornia pad import.
+    text = text.replace(
+        "        pad,\n",
+        "",
+    )
+
+    # Ensure torch.nn.functional is available.
+    if (
+        "import torch.nn.functional as F"
+        not in text
+    ):
+
+        text = text.replace(
+            "import torch\n",
+            "import torch\n"
+            "import torch.nn.functional as F\n",
+            1,
+        )
+
+    # Provide the compatibility alias used by the
+    # modern LTXVideo implementation.
+    if (
+        "pad = F.pad"
+        not in text
+    ):
+
+        marker = (
+            "import torch.nn.functional as F\n"
+        )
+
+        text = text.replace(
+            marker,
+            marker +
+            "\n"
+            "# Kornia >= 0.8.3 compatibility\n"
+            "pad = F.pad\n",
+            1,
+        )
+
+    if text != original:
+
+        pyramid_file.write_text(
+            text,
+            encoding="utf-8",
+        )
+
+        print(
+            "✅ Applied Kornia compatibility patch."
+        )
+
+    else:
+
+        print(
+            "✅ Kornia compatibility already applied."
+        )
+    return
 
     old_block = """from kornia.geometry.transform.pyramid import (
     PyrUp,
