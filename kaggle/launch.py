@@ -135,6 +135,8 @@ REQUIRED_CUSTOM_NODES = [
     "ComfyUI-VideoHelperSuite",
 
     "rgthree-comfy",
+
+    "ComfyUI-KJNodes",
 ]
 
 
