@@ -1,0 +1,33 @@
+Analyze the story and create a detailed character bible.
+
+For each character provide:
+
+- character_id
+- name
+- role
+- personality
+- motivation
+- age range
+- facial appearance
+- hairstyle
+- body build
+- clothing
+- accessories
+- distinctive features
+- visual consistency rules
+
+REFERENCE RULE:
+
+If a character reference image is provided, preserve that visual identity.
+
+If no reference image is provided, create the visual identity from the story.
+
+Once created, the visual identity should remain stable throughout the production.
+
+STORY:
+
+{story}
+
+AVAILABLE CHARACTER REFERENCES:
+
+{references}
