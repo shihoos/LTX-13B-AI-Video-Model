@@ -22,23 +22,13 @@ class ShotPlanner:
         self.model = QwenStoryModel()
 
     def create_shot_plan(
-            self,
-            story: str,
-            characters: list,
-            scene,
-            continuity_context = (
-        continuity_manager.build_context(
-            previous_shot
-        )
-    )
-
-    shots = shot_planner.create_shot_plan(
-    story=story,
-    characters=characters,
-    scene=scene,
-    continuity_context=continuity_context,
-    )
-) -> list:
+        self,
+        story: str,
+        characters: list,
+        scene,
+        continuity_context: str = "",
+        shot_start_index: int = 1,
+    ) -> list:
 
         project_root = (
             Path(__file__)
@@ -133,83 +123,105 @@ class ShotPlanner:
             [],
         ):
 
+            default_shot_id = (
+                f"shot_"
+                f"{shot_start_index + len(shots):03d}"
+            )
+
+            shot = Shot(
+                shot_id=item.get(
+                    "shot_id"
+                ) or default_shot_id,
+
+                scene_id=item.get(
+                    "scene_id"
+                ) or scene_data.get(
+                    "scene_id",
+                    "",
+                ),
+
+                order=item.get(
+                    "order",
+                    len(shots) + 1,
+                ),
+
+                duration_seconds=float(
+                    item.get(
+                        "duration_seconds",
+                        5.0,
+                    )
+                ),
+
+                characters=item.get(
+                    "characters",
+                    [],
+                ),
+
+                location=item.get(
+                    "location",
+                    "",
+                ),
+
+                action=item.get(
+                    "action",
+                    "",
+                ),
+
+                camera_shot=item.get(
+                    "camera_shot",
+                    "",
+                ),
+
+                camera_movement=item.get(
+                    "camera_movement",
+                    "",
+                ),
+
+                lighting=item.get(
+                    "lighting",
+                    "",
+                ),
+
+                mood=item.get(
+                    "mood",
+                    "",
+                ),
+
+                visual_prompt=item.get(
+                    "visual_prompt",
+                    "",
+                ),
+
+                negative_prompt=item.get(
+                    "negative_prompt",
+                    "",
+                ),
+
+                previous_shot=item.get(
+                    "previous_shot"
+                ),
+
+                next_shot=item.get(
+                    "next_shot"
+                ),
+
+                continuity_notes=item.get(
+                    "continuity_notes",
+                    "",
+                ),
+
+                seed=item.get(
+                    "seed"
+                ),
+
+                reference_images=item.get(
+                    "reference_images",
+                    [],
+                ),
+            )
+
             shots.append(
-                Shot(
-                    shot_id=item.get(
-                        "shot_id",
-                        f"shot_{len(shots) + 1:03d}",
-                    ),
-                    scene_id=item.get(
-                        "scene_id",
-                        scene_data.get(
-                            "scene_id",
-                            "",
-                        ),
-                    ),
-                    order=item.get(
-                        "order",
-                        len(shots) + 1,
-                    ),
-                    duration_seconds=float(
-                        item.get(
-                            "duration_seconds",
-                            5.0,
-                        )
-                    ),
-                    characters=item.get(
-                        "characters",
-                        [],
-                    ),
-                    location=item.get(
-                        "location",
-                        "",
-                    ),
-                    action=item.get(
-                        "action",
-                        "",
-                    ),
-                    camera_shot=item.get(
-                        "camera_shot",
-                        "",
-                    ),
-                    camera_movement=item.get(
-                        "camera_movement",
-                        "",
-                    ),
-                    lighting=item.get(
-                        "lighting",
-                        "",
-                    ),
-                    mood=item.get(
-                        "mood",
-                        "",
-                    ),
-                    visual_prompt=item.get(
-                        "visual_prompt",
-                        "",
-                    ),
-                    negative_prompt=item.get(
-                        "negative_prompt",
-                        "",
-                    ),
-                    previous_shot=item.get(
-                        "previous_shot",
-                    ),
-                    next_shot=item.get(
-                        "next_shot",
-                    ),
-                    continuity_notes=item.get(
-                        "continuity_notes",
-                        "",
-                    ),
-                    seed=item.get(
-                        "seed",
-                    ),
-                    reference_images=item.get(
-                        "reference_images",
-                        [],
-                    ),
-                )
+                shot
             )
 
         return shots
