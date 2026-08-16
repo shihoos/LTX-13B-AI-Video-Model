@@ -27,7 +27,7 @@ COMFY_REPO = (
     "https://github.com/Comfy-Org/ComfyUI.git"
 )
 
-COMFY_COMMIT = "v0.33.0"
+COMFY_COMMIT = "6c5efbfb"
 
 
 # Verified LTXVideo revision containing:
