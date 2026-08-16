@@ -1,0 +1,88 @@
+You are planning the scenes of a cinematic video.
+
+Convert the following story into a structured sequence of scenes.
+
+Each scene represents one continuous story section that may later
+contain multiple shots.
+
+Do not generate video prompts.
+Do not generate shots.
+Do not add information outside the JSON structure.
+
+STORY:
+
+{story}
+
+CHARACTERS:
+
+{characters}
+
+Return ONLY valid JSON in exactly this format:
+
+{
+  "scenes": [
+    {
+      "scene_id": "scene_001",
+      "order": 1,
+      "location": "",
+      "time_of_day": "",
+      "description": "",
+      "characters": [],
+      "story_summary": "",
+      "continuity_notes": "",
+      "shot_ids": []
+    }
+  ]
+}
+
+FIELD RULES:
+
+scene_id:
+Use sequential IDs:
+scene_001
+scene_002
+scene_003
+
+order:
+Use sequential integers starting from 1.
+
+location:
+Describe the physical location of the scene.
+
+time_of_day:
+Examples:
+morning
+afternoon
+evening
+night
+sunrise
+sunset
+
+description:
+Describe the overall visual situation and environment of the scene.
+Do not describe individual camera shots.
+
+characters:
+List only character names present in the scene.
+
+story_summary:
+Summarize what happens in this scene.
+
+continuity_notes:
+Describe information that must remain consistent when the next
+scene begins, including character state, clothing, objects,
+location changes, injuries, emotional state, or important actions.
+
+shot_ids:
+Return an empty list [].
+Shot IDs will be created later by the shot planning stage.
+
+IMPORTANT:
+
+- Return valid JSON only.
+- Do not use Markdown.
+- Do not wrap the JSON in ``` blocks.
+- Do not include explanations before or after the JSON.
+- Keep character names consistent with the provided character data.
+- Do not invent new major characters unless required by the story.
+- Preserve the logical order of events.
