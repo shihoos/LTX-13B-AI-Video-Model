@@ -8,26 +8,37 @@ import sys
 # PROJECT PATHS
 # ============================================================
 
-PROJECT = Path("/kaggle/working/LTX-13B-AI-Video-Model")
+PROJECT = Path(
+    "/kaggle/working/LTX-13B-AI-Video-Model"
+)
 
 COMFY = PROJECT / "ComfyUI"
 
 CUSTOM = COMFY / "custom_nodes"
 
-VENV = PROJECT / ".venv"
-
 
 # ============================================================
-# VERSION-PINNED CORE
+# VERSION-PINNED ENVIRONMENT
 # ============================================================
 
-# ComfyUI state from the LTXV 0.9.8 timeframe.
-COMFY_REPO = "https://github.com/Comfy-Org/ComfyUI.git"
-COMFY_COMMIT = None
+# This is the ComfyUI version currently confirmed working
+# in your Kaggle environment.
+COMFY_REPO = (
+    "https://github.com/Comfy-Org/ComfyUI.git"
+)
 
-# LTXVideo state corresponding to the 0.9.8 release.
-LTX_REPO = "https://github.com/Lightricks/ComfyUI-LTXVideo.git"
-LTX_COMMIT = None
+COMFY_COMMIT = "v0.33.0"
+
+
+# Verified LTXVideo revision containing:
+# - LTXVLatentUpsamplerModelLoader
+# - LTXVLatentUpsampler
+# - STGGuiderAdvanced
+# - LTXVBaseSampler
+# - LTXVAdainLatent
+LTXVIDEO_COMMIT = (
+    "ee11be3ce229c3afd5fadf8a1258eb8b84af33b1"
+)
 
 
 # ============================================================
@@ -35,25 +46,36 @@ LTX_COMMIT = None
 # ============================================================
 
 NODES = {
+
     "ComfyUI-GGUF": {
-        "url": "https://github.com/city96/ComfyUI-GGUF.git",
+        "url":
+            "https://github.com/city96/ComfyUI-GGUF.git",
         "commit": None,
     },
+
     "ComfyUI-LTXVideo": {
-        "url": "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
-        "commit": "ee11be3ce229c3afd5fadf8a1258eb8b84af33b1"
+        "url":
+            "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
+        "commit": LTXVIDEO_COMMIT,
     },
+
     "ComfyUI-VideoHelperSuite": {
-        "url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
+        "url":
+            "https://github.com/Kosinkadink/"
+            "ComfyUI-VideoHelperSuite.git",
         "commit": None,
     },
+
     "rgthree-comfy": {
-        "url": "https://github.com/rgthree/rgthree-comfy.git",
+        "url":
+            "https://github.com/rgthree/rgthree-comfy.git",
         "commit": None,
     },
+
     "ComfyUI-KJNodes": {
-    "url": "https://github.com/kijai/ComfyUI-KJNodes.git",
-    "commit": None,
+        "url":
+            "https://github.com/kijai/ComfyUI-KJNodes.git",
+        "commit": None,
     },
 }
 
@@ -66,16 +88,107 @@ EXPECTED_TORCH_PREFIX = "2.10.0+cu128"
 
 
 # ============================================================
-# COMMAND HELPERS
+# PACKAGES THAT MUST NEVER BE REPLACED
+# ============================================================
+
+FORBIDDEN_PACKAGES = {
+    "torch",
+    "torchvision",
+    "torchaudio",
+}
+
+
+# ============================================================
+# COMMAND HELPER
 # ============================================================
 
 def run(command, cwd=None):
-    print("\n$", " ".join(map(str, command)))
+    print(
+        "\n$ " +
+        " ".join(
+            map(str, command)
+        )
+    )
 
     subprocess.run(
         command,
         cwd=cwd,
         check=True,
+    )
+
+
+# ============================================================
+# GIT HELPERS
+# ============================================================
+
+def get_current_commit(
+    repository: Path,
+):
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "rev-parse",
+            "HEAD",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    return result.stdout.strip()
+
+
+def checkout_pinned_commit(
+    repository: Path,
+    commit: str,
+):
+    """
+    Deterministically switch an existing repository to
+    an exact revision.
+
+    No shallow-depth assumptions are used.
+    """
+
+    print(
+        f"\nPinning repository to: {commit}"
+    )
+
+    run(
+        [
+            "git",
+            "fetch",
+            "--all",
+            "--tags",
+            "--prune",
+        ],
+        cwd=repository,
+    )
+
+    run(
+        [
+            "git",
+            "checkout",
+            "--force",
+            commit,
+        ],
+        cwd=repository,
+    )
+
+    actual = get_current_commit(
+        repository
+    )
+
+    if actual != commit:
+        raise RuntimeError(
+            "\nRepository pin verification failed.\n"
+            f"Expected: {commit}\n"
+            f"Found:    {actual}"
+        )
+
+    print(
+        f"✅ Exact revision active: {actual}"
     )
 
 
@@ -85,120 +198,124 @@ def clone_repo(
     commit: str | None = None,
 ):
     """
-    Clone a repository.
+    Clone a repository or update an existing repository.
 
-    An existing incomplete directory is removed automatically.
+    When a commit is supplied, the exact commit is checked
+    out using full Git history. No --depth-based checkout
+    is used for pinned repositories.
     """
+
+    # --------------------------------------------------------
+    # Existing directory
+    # --------------------------------------------------------
 
     if destination.exists():
 
-        git_dir = destination / ".git"
+        git_dir = (
+            destination / ".git"
+        )
 
-        # A valid repository already exists.
         if git_dir.exists():
 
             print(
-                f"Repository already exists: {destination}"
+                f"\nRepository already exists:"
+                f" {destination}"
             )
 
+            # A pinned repository must be moved to the
+            # requested exact revision.
             if commit:
-                run(
-                    [
-                        "git",
-                        "fetch",
-                        "--depth",
-                        "50",
-                        "origin",
-                    ],
-                    cwd=destination,
-                )
-
-                run(
-                    [
-                        "git",
-                        "checkout",
-                        commit,
-                    ],
-                    cwd=destination,
+                checkout_pinned_commit(
+                    destination,
+                    commit,
                 )
 
             return
 
-        # Existing directory is not a valid Git repository.
+        # Directory exists but is not a Git repository.
         print(
-            f"Removing incomplete directory: {destination}"
+            "\nRemoving incomplete repository:"
+            f" {destination}"
         )
 
-        shutil.rmtree(destination)
+        shutil.rmtree(
+            destination
+        )
+
+    # --------------------------------------------------------
+    # Fresh clone
+    # --------------------------------------------------------
 
     destination.parent.mkdir(
         parents=True,
         exist_ok=True,
     )
 
+    print(
+        f"\nCloning repository:\n{url}"
+    )
+
+    # Full clone deliberately used here because we may need
+    # an historical pinned commit.
     run(
         [
             "git",
             "clone",
-            "--depth",
-            "1",
             url,
             str(destination),
         ]
     )
 
+    # --------------------------------------------------------
+    # Pin exact revision
+    # --------------------------------------------------------
+
     if commit:
-        print(
-            f"Fetching full history for pinned commit: {commit}"
-        )
-    
-        run(
-            [
-                "git",
-                "fetch",
-                "--all",
-                "--tags",
-                "--prune",
-            ],
-            cwd=destination,
-        )
-    
-        run(
-            [
-                "git",
-                "checkout",
-                "--force",
-                commit,
-            ],
-            cwd=destination,
+        checkout_pinned_commit(
+            destination,
+            commit,
         )
 
+
 # ============================================================
-# TORCH VERIFICATION
+# PYTORCH VERIFICATION
 # ============================================================
 
 def verify_torch():
 
     try:
-
         import torch
 
-    except ImportError:
-
+    except ImportError as exc:
         raise RuntimeError(
             "PyTorch is not installed."
-        )
+        ) from exc
 
-    print("\n" + "=" * 60)
-    print("PyTorch verification")
-    print("=" * 60)
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "PYTORCH / CUDA VERIFICATION"
+    )
+    print(
+        "=" * 70
+    )
 
-    print("Torch:", torch.__version__)
-    print("CUDA:", torch.version.cuda)
+    print(
+        "Torch:",
+        torch.__version__,
+    )
+
+    print(
+        "CUDA:",
+        torch.version.cuda,
+    )
+
     print(
         "CUDA available:",
         torch.cuda.is_available(),
     )
+
     print(
         "GPU count:",
         torch.cuda.device_count(),
@@ -207,8 +324,7 @@ def verify_torch():
     if not torch.cuda.is_available():
 
         raise RuntimeError(
-            "CUDA is not available. "
-            "Do not continue."
+            "CUDA is unavailable."
         )
 
     if not torch.__version__.startswith(
@@ -217,16 +333,15 @@ def verify_torch():
 
         raise RuntimeError(
             "Unexpected PyTorch version.\n"
-            f"Expected: {EXPECTED_TORCH_PREFIX}\n"
-            f"Found:    {torch.__version__}\n\n"
-            "This bootstrap intentionally refuses "
-            "to modify the existing Torch installation."
+            f"Expected prefix: "
+            f"{EXPECTED_TORCH_PREFIX}\n"
+            f"Found: {torch.__version__}"
         )
 
     if torch.cuda.device_count() < 2:
 
         raise RuntimeError(
-            "Expected two CUDA GPUs."
+            "This project requires two CUDA GPUs."
         )
 
     for index in range(
@@ -238,9 +353,72 @@ def verify_torch():
             f"{torch.cuda.get_device_name(index)}"
         )
 
+    print(
+        "\n✅ PyTorch environment is correct."
+    )
+
 
 # ============================================================
-# CORE COMFYUI DEPENDENCIES
+# REQUIREMENT FILTERING
+# ============================================================
+
+def filter_requirements(
+    source: Path,
+    destination: Path,
+):
+    """
+    Remove packages that are not allowed to replace
+    the known-good Torch environment.
+    """
+
+    filtered = []
+
+    for raw_line in source.read_text(
+        encoding="utf-8"
+    ).splitlines():
+
+        line = raw_line.strip()
+
+        if not line:
+            continue
+
+        if line.startswith("#"):
+            continue
+
+        # Remove inline comments.
+        line = line.split(
+            "#",
+            1
+        )[0].strip()
+
+        if not line:
+            continue
+
+        package_name = (
+            line
+            .split("==", 1)[0]
+            .split(">=", 1)[0]
+            .split("<=", 1)[0]
+            .split("~=", 1)[0]
+            .split(">", 1)[0]
+            .split("<", 1)[0]
+            .strip()
+            .lower()
+        )
+
+        if package_name in FORBIDDEN_PACKAGES:
+            continue
+
+        filtered.append(line)
+
+    destination.write_text(
+        "\n".join(filtered) + "\n",
+        encoding="utf-8",
+    )
+
+
+# ============================================================
+# COMFYUI DEPENDENCIES
 # ============================================================
 
 def install_comfy_dependencies():
@@ -253,57 +431,23 @@ def install_comfy_dependencies():
     if not requirements.exists():
 
         raise FileNotFoundError(
-            f"Missing ComfyUI requirements file: "
+            f"Missing requirements file:\n"
             f"{requirements}"
         )
 
-    print(
-        "\nInstalling ComfyUI dependencies "
-        "without replacing PyTorch..."
-    )
-
     filtered = (
         PROJECT /
-        "comfy_requirements_no_torch.txt"
+        ".comfy_requirements_safe.txt"
     )
 
-    lines = requirements.read_text(
-        encoding="utf-8"
-    ).splitlines()
+    filter_requirements(
+        requirements,
+        filtered,
+    )
 
-    excluded = {
-        "torch",
-        "torchvision",
-        "torchaudio",
-    }
-
-    kept = []
-
-    for line in lines:
-
-        stripped = line.strip()
-
-        if not stripped:
-            continue
-
-        if stripped.startswith("#"):
-            continue
-
-        package_name = (
-            stripped.split("=")[0]
-            .split(">")[0]
-            .split("<")[0]
-            .strip()
-        )
-
-        if package_name in excluded:
-            continue
-
-        kept.append(stripped)
-
-    filtered.write_text(
-        "\n".join(kept) + "\n",
-        encoding="utf-8",
+    print(
+        "\nInstalling ComfyUI dependencies "
+        "without modifying Torch..."
     )
 
     run(
@@ -318,6 +462,11 @@ def install_comfy_dependencies():
         ]
     )
 
+    try:
+        filtered.unlink()
+    except OSError:
+        pass
+
 
 # ============================================================
 # CUSTOM NODE DEPENDENCIES
@@ -325,9 +474,22 @@ def install_comfy_dependencies():
 
 def install_node_dependencies():
 
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "CUSTOM NODE DEPENDENCIES"
+    )
+    print(
+        "=" * 70
+    )
+
     for name in NODES:
 
-        node_dir = CUSTOM / name
+        node_dir = (
+            CUSTOM /
+            name
+        )
 
         requirements = (
             node_dir /
@@ -337,9 +499,35 @@ def install_node_dependencies():
         if not requirements.exists():
 
             print(
-                f"No requirements.txt for {name}; "
-                "skipping."
+                f"{name}: "
+                "no requirements.txt"
             )
+
+            continue
+
+        filtered = (
+            PROJECT /
+            f".{name}_requirements_safe.txt"
+        )
+
+        filter_requirements(
+            requirements,
+            filtered,
+        )
+
+        if not filtered.read_text(
+            encoding="utf-8"
+        ).strip():
+
+            print(
+                f"{name}: "
+                "no additional safe dependencies"
+            )
+
+            try:
+                filtered.unlink()
+            except OSError:
+                pass
 
             continue
 
@@ -355,69 +543,66 @@ def install_node_dependencies():
                 "install",
                 "-q",
                 "-r",
-                str(requirements),
+                str(filtered),
             ]
         )
 
+        try:
+            filtered.unlink()
+        except OSError:
+            pass
+
 
 # ============================================================
-# VALIDATE INSTALLATION
+# VALIDATE REPOSITORIES
 # ============================================================
 
-def validate_comfy():
+def validate_repositories():
 
     print(
-        "\n" + "=" * 60
+        "\n" + "=" * 70
     )
-
     print(
-        "Validating ComfyUI installation"
+        "VALIDATING REPOSITORIES"
     )
-
     print(
-        "=" * 60
+        "=" * 70
     )
 
-    main_py = COMFY / "main.py"
+    # --------------------------------------------------------
+    # ComfyUI
+    # --------------------------------------------------------
 
-    if not main_py.exists():
-
-        raise RuntimeError(
-            f"ComfyUI main.py was not found: "
-            f"{main_py}"
-        )
-
-    requirements = (
+    if not (
         COMFY /
-        "requirements.txt"
-    )
-
-    if not requirements.exists():
+        "main.py"
+    ).exists():
 
         raise RuntimeError(
-            "ComfyUI requirements.txt is missing."
+            "ComfyUI main.py is missing."
         )
+
+    comfy_revision = (
+        get_current_commit(
+            COMFY
+        )
+    )
 
     print(
         "ComfyUI:",
-        COMFY,
+        comfy_revision,
     )
 
-    print(
-        "main.py: OK"
-    )
+    # --------------------------------------------------------
+    # Custom nodes
+    # --------------------------------------------------------
 
-    print(
-        "requirements.txt: OK"
-    )
+    for name, info in NODES.items():
 
-    print(
-        "Custom nodes:"
-    )
-
-    for name in NODES:
-
-        node_dir = CUSTOM / name
+        node_dir = (
+            CUSTOM /
+            name
+        )
 
         if not node_dir.exists():
 
@@ -425,8 +610,71 @@ def validate_comfy():
                 f"Missing custom node: {name}"
             )
 
+        revision = (
+            get_current_commit(
+                node_dir
+            )
+        )
+
+        requested = info["commit"]
+
+        if requested:
+
+            if revision != requested:
+
+                raise RuntimeError(
+                    f"\n{name} revision mismatch.\n"
+                    f"Expected: {requested}\n"
+                    f"Found:    {revision}"
+                )
+
+            print(
+                f"{name}: {revision} ✅"
+            )
+
+        else:
+
+            print(
+                f"{name}: {revision}"
+            )
+
+
+# ============================================================
+# VALIDATE COMFYUI FILES
+# ============================================================
+
+def validate_comfy():
+
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "VALIDATING COMFYUI INSTALLATION"
+    )
+    print(
+        "=" * 70
+    )
+
+    required_files = [
+        COMFY / "main.py",
+        COMFY / "requirements.txt",
+        CUSTOM / "ComfyUI-GGUF",
+        CUSTOM / "ComfyUI-LTXVideo",
+        CUSTOM / "ComfyUI-VideoHelperSuite",
+        CUSTOM / "rgthree-comfy",
+        CUSTOM / "ComfyUI-KJNodes",
+    ]
+
+    for path in required_files:
+
+        if not path.exists():
+
+            raise RuntimeError(
+                f"Missing required path:\n{path}"
+            )
+
         print(
-            f"  {name}: OK"
+            f"✅ {path}"
         )
 
 
@@ -436,32 +684,60 @@ def validate_comfy():
 
 def main():
 
-    print("=" * 60)
-    print("LTX-13B AI Video Model Bootstrap")
-    print("=" * 60)
+    print(
+        "=" * 70
+    )
+
+    print(
+        "LTX-13B AI VIDEO MODEL BOOTSTRAP"
+    )
+
+    print(
+        "=" * 70
+    )
 
     PROJECT.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    # 1. Never alter the known-good Torch environment.
+    # --------------------------------------------------------
+    # 1. Verify the known-good Torch environment
+    # --------------------------------------------------------
+
     verify_torch()
 
-    # 2. Install the pinned ComfyUI core.
+    # --------------------------------------------------------
+    # 2. Install / synchronize pinned ComfyUI
+    # --------------------------------------------------------
+
+    print(
+        "\nInstalling / synchronizing ComfyUI..."
+    )
+
     clone_repo(
         COMFY_REPO,
         COMFY,
         COMFY_COMMIT,
     )
 
-    # 3. Create custom node directory.
+    # --------------------------------------------------------
+    # 3. Create custom-node directory
+    # --------------------------------------------------------
+
     CUSTOM.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    # 4. Install custom nodes.
+    # --------------------------------------------------------
+    # 4. Install / synchronize custom nodes
+    # --------------------------------------------------------
+
+    print(
+        "\nInstalling / synchronizing custom nodes..."
+    )
+
     for name, info in NODES.items():
 
         clone_repo(
@@ -470,22 +746,38 @@ def main():
             info["commit"],
         )
 
-    # 5. Install ComfyUI dependencies,
-    #    explicitly excluding Torch packages.
+    # --------------------------------------------------------
+    # 5. Install ComfyUI dependencies safely
+    # --------------------------------------------------------
+
     install_comfy_dependencies()
 
-    # 6. Install custom-node dependencies.
+    # --------------------------------------------------------
+    # 6. Install custom-node dependencies safely
+    # --------------------------------------------------------
+
     install_node_dependencies()
 
-    # 7. Validate everything.
+    # --------------------------------------------------------
+    # 7. Validate filesystem
+    # --------------------------------------------------------
+
     validate_comfy()
 
-    # 8. Verify Torch AGAIN because pip is not allowed
-    #    to change it.
+    # --------------------------------------------------------
+    # 8. Validate exact Git revisions
+    # --------------------------------------------------------
+
+    validate_repositories()
+
+    # --------------------------------------------------------
+    # 9. Verify Torch again
+    # --------------------------------------------------------
+
     verify_torch()
 
     print(
-        "\n" + "=" * 60
+        "\n" + "=" * 70
     )
 
     print(
@@ -493,7 +785,7 @@ def main():
     )
 
     print(
-        "=" * 60
+        "=" * 70
     )
 
 
