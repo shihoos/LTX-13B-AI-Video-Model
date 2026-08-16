@@ -13,10 +13,17 @@ from planner.qwen_loader import (
 
 class StoryPlanner:
 
-    def __init__(self):
+    def __init__(
+    self,
+    model=None,
+    ):
 
-        self.model = QwenStoryModel()
-
+    self.model = (
+        model
+        if model is not None
+        else QwenStoryModel()
+    )
+    
     def _read_prompt(
         self,
         filename: str,
