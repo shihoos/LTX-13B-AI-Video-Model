@@ -1,0 +1,12 @@
+{
+  "story_mode": "ai_story",
+  "reference_mode": "auto",
+  "use_character_references": true,
+  "use_general_references": true,
+  "use_audio": true,
+  "use_music": true,
+  "use_ic_lora_detailer": true,
+  "use_ltx_spatial_upscaler": true,
+  "multi_gpu_mode": "parallel",
+  "gpu_ids": [0, 1]
+}
