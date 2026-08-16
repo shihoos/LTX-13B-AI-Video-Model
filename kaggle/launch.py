@@ -545,6 +545,79 @@ def ensure_runtime_dependencies():
 # CUSTOM NODE REQUIREMENTS
 # ============================================================
 
+def ensure_custom_nodes():
+
+    print()
+    print("=" * 70)
+    print(
+        "CHECKING CUSTOM NODE INSTALLATIONS"
+    )
+    print("=" * 70)
+
+    custom_nodes_dir = (
+        COMFY / "custom_nodes"
+    )
+
+    custom_nodes_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    custom_node_repositories = {
+
+        "ComfyUI-GGUF":
+            "https://github.com/city96/ComfyUI-GGUF.git",
+
+        "ComfyUI-LTXVideo":
+            "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
+
+        "ComfyUI-VideoHelperSuite":
+            "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
+
+        "rgthree-comfy":
+            "https://github.com/rgthree/rgthree-comfy.git",
+
+        "ComfyUI-KJNodes":
+            "https://github.com/kijai/ComfyUI-KJNodes.git",
+    }
+
+    for name, url in custom_node_repositories.items():
+
+        target = (
+            custom_nodes_dir / name
+        )
+
+        if target.exists():
+
+            print(
+                f"✅ {name}"
+            )
+
+            continue
+
+        print(
+            f"⚠️ {name} missing."
+        )
+
+        print(
+            f"Cloning {name}..."
+        )
+
+        run(
+            [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                url,
+                str(target),
+            ]
+        )
+
+        print(
+            f"✅ {name} cloned."
+        )
+
 def install_custom_node_requirements():
 
     print()
