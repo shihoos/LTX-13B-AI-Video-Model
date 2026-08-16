@@ -196,6 +196,8 @@ def start_comfyui():
         HOST,
         "--port",
         str(PORT),
+        "--front-end-version",
+        "Comfy-Org/ComfyUI_frontend@latest",
     ]
 
     print()
