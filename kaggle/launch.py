@@ -1295,6 +1295,178 @@ def verify_nodes():
 
 
 # ============================================================
+# CANONICAL WORKFLOW AUTO-INSTALL / AUTO-LOAD
+# ============================================================
+
+PROJECT_WORKFLOW = (
+    PROJECT
+    / "workflows"
+    / "baseline"
+    / "ltxv-13b-dist-i2v-base.json"
+)
+
+AUTOLOAD_NODE = (
+    COMFY
+    / "custom_nodes"
+    / "LTXProjectWorkflow"
+)
+
+AUTOLOAD_WEB = AUTOLOAD_NODE / "web"
+
+
+def install_project_workflow():
+    """Install the repository's canonical workflow and frontend autoloader."""
+
+    import shutil
+
+    if not PROJECT_WORKFLOW.exists():
+        raise FileNotFoundError(
+            "\nCanonical project workflow not found:\n"
+            f"{PROJECT_WORKFLOW}"
+        )
+
+    # --------------------------------------------------------
+    # 1. Normal workflow copy for ComfyUI's workflow storage.
+    # --------------------------------------------------------
+
+    workflow_dir = (
+        COMFY
+        / "user"
+        / "default"
+        / "workflows"
+    )
+
+    workflow_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    destination = workflow_dir / PROJECT_WORKFLOW.name
+
+    shutil.copy2(
+        PROJECT_WORKFLOW,
+        destination,
+    )
+
+    # --------------------------------------------------------
+    # 2. Tiny custom-node frontend extension.
+    # --------------------------------------------------------
+
+    AUTOLOAD_WEB.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    init_file = AUTOLOAD_NODE / "__init__.py"
+
+    init_file.write_text(
+        """WEB_DIRECTORY = "./web"
+
+NODE_CLASS_MAPPINGS = {}
+NODE_DISPLAY_NAME_MAPPINGS = {}
+
+__all__ = [
+    "NODE_CLASS_MAPPINGS",
+    "NODE_DISPLAY_NAME_MAPPINGS",
+    "WEB_DIRECTORY",
+]
+""",
+        encoding="utf-8",
+    )
+
+    web_workflow = AUTOLOAD_WEB / PROJECT_WORKFLOW.name
+    shutil.copy2(PROJECT_WORKFLOW, web_workflow)
+
+    js_file = AUTOLOAD_WEB / "autoload_workflow.js"
+
+    js_file.write_text(
+        """import { app } from "../../scripts/app.js";
+
+app.registerExtension({
+    name: "shihoos.LTXProjectWorkflow",
+
+    async setup() {
+        const url =
+            "/extensions/LTXProjectWorkflow/"
+            + "ltxv-13b-dist-i2v-base.json";
+
+        for (let attempt = 1; attempt <= 20; attempt++) {
+            try {
+                await new Promise((resolve) =>
+                    setTimeout(resolve, 500)
+                );
+
+                if (
+                    !app ||
+                    typeof app.loadGraphData !== "function"
+                ) {
+                    continue;
+                }
+
+                const response = await fetch(
+                    url,
+                    {
+                        cache: "no-store",
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(
+                        `HTTP ${response.status}`
+                    );
+                }
+
+                const workflow = await response.json();
+
+                await app.loadGraphData(
+                    workflow,
+                    true,
+                    true,
+                    "ltxv-13b-dist-i2v-base"
+                );
+
+                console.log(
+                    "[LTXProjectWorkflow] "
+                    + "Canonical LTX 13B workflow loaded."
+                );
+
+                return;
+            } catch (error) {
+                console.warn(
+                    "[LTXProjectWorkflow] "
+                    + `autoload attempt ${attempt}/20 failed:`,
+                    error
+                );
+            }
+        }
+
+        console.error(
+            "[LTXProjectWorkflow] "
+            + "Could not automatically load the canonical workflow."
+        );
+    },
+});
+""",
+        encoding="utf-8",
+    )
+
+    print()
+    print("=" * 70)
+    print("CANONICAL WORKFLOW AUTO-LOAD")
+    print("=" * 70)
+    print(
+        f"✅ Repository workflow: {PROJECT_WORKFLOW}"
+    )
+    print(
+        f"✅ ComfyUI workflow copy: {destination}"
+    )
+    print(
+        f"✅ Frontend autoloader: {js_file}"
+    )
+
+
+
+# ============================================================
 # PORT CHECK
 # ============================================================
 
@@ -1428,7 +1600,13 @@ def main():
     verify_nodes()
 
     # --------------------------------------------------------
-    # 11. Already-running protection
+    # 11. Canonical project workflow
+    # --------------------------------------------------------
+
+    install_project_workflow()
+
+    # --------------------------------------------------------
+    # 12. Already-running protection
     # --------------------------------------------------------
 
     if port_open():
@@ -1446,7 +1624,7 @@ def main():
         return
 
     # --------------------------------------------------------
-    # 12. Start ComfyUI + tunnel
+    # 13. Start ComfyUI + tunnel
     # --------------------------------------------------------
 
     start_tunnel()
