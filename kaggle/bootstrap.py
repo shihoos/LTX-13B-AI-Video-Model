@@ -30,7 +30,7 @@ COMFY_REPO = (
 )
 
 COMFY_COMMIT = (
-    "a97f2f850abd7dd330e6363c8d8074bb243eb413"
+    None
 )
 
 
