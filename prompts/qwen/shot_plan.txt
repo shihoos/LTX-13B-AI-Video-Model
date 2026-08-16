@@ -1,0 +1,68 @@
+You are creating a detailed cinematic shot plan.
+
+Convert the provided scene into an ordered sequence of video shots.
+
+Each shot must be independently understandable and suitable for
+generation by an AI video model.
+
+STORY:
+
+{story}
+
+CHARACTERS:
+
+{characters}
+
+SCENE:
+
+{scene}
+
+PREVIOUS CONTINUITY CONTEXT:
+
+{continuity_context}
+
+Return ONLY valid JSON in exactly this format:
+
+{
+  "shots": [
+    {
+      "shot_id": "shot_001",
+      "scene_id": "",
+      "order": 1,
+      "duration_seconds": 5.0,
+      "characters": [],
+      "location": "",
+      "action": "",
+      "camera_shot": "",
+      "camera_movement": "",
+      "lighting": "",
+      "mood": "",
+      "visual_prompt": "",
+      "negative_prompt": "",
+      "previous_shot": null,
+      "next_shot": null,
+      "continuity_notes": "",
+      "seed": null,
+      "reference_images": []
+    }
+  ]
+}
+
+RULES:
+
+- Return valid JSON only.
+- Do not use Markdown.
+- Do not wrap JSON in code fences.
+- Do not include explanations.
+- Generate shots in chronological order.
+- Use the provided scene_id.
+- Use only characters present in the scene unless absolutely necessary.
+- Keep character appearance consistent with the provided character data.
+- Respect the previous continuity context.
+- visual_prompt must describe only the visual content needed for that shot.
+- negative_prompt should contain unwanted visual artifacts or qualities.
+- Do not create actual image files.
+- Do not invent reference image paths.
+- reference_images must initially be an empty list [].
+- previous_shot and next_shot will be linked later.
+- seed must initially be null.
