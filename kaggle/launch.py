@@ -746,6 +746,85 @@ def install_custom_node_requirements():
 # LTXVIDEO / KORNIA COMPATIBILITY
 # ============================================================
 
+LTXVIDEO_COMMIT = "ee11be3ce229c3afd5fadf8a1258eb8b84af33b1"
+
+
+def get_git_commit(repository):
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repository),
+            "rev-parse",
+            "HEAD",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout.strip()
+
+
+def ensure_ltxvideo_revision():
+    """Ensure the installed LTXVideo checkout is the verified revision."""
+
+    ltx_dir = (
+        COMFY
+        / "custom_nodes"
+        / "ComfyUI-LTXVideo"
+    )
+
+    if not ltx_dir.exists():
+        raise FileNotFoundError(
+            f"ComfyUI-LTXVideo not found:\n{ltx_dir}"
+        )
+
+    print()
+    print("Checking LTXVideo Git revision...")
+
+    current = get_git_commit(ltx_dir)
+
+    if current != LTXVIDEO_COMMIT:
+        print(
+            f"⚠️ LTXVideo revision is {current}; "
+            f"switching to {LTXVIDEO_COMMIT}."
+        )
+
+        run(
+            [
+                "git",
+                "fetch",
+                "--all",
+                "--tags",
+                "--prune",
+            ],
+            cwd=ltx_dir,
+        )
+
+        run(
+            [
+                "git",
+                "checkout",
+                "--force",
+                LTXVIDEO_COMMIT,
+            ],
+            cwd=ltx_dir,
+        )
+
+        current = get_git_commit(ltx_dir)
+
+    if current != LTXVIDEO_COMMIT:
+        raise RuntimeError(
+            "LTXVideo revision verification failed.\n"
+            f"Expected: {LTXVIDEO_COMMIT}\n"
+            f"Found:    {current}"
+        )
+
+    print(
+        f"✅ LTXVideo revision: {current}"
+    )
+
+
 def patch_ltx_kornia_compatibility():
 
     print()
@@ -760,30 +839,14 @@ def patch_ltx_kornia_compatibility():
         / "pyramid_blending.py"
     )
 
-    # The pinned LTX 0.9.8-era revision does not contain
-    # the modern pyramid_blending.py module.
-    #
-    # Therefore there is nothing to patch.
+    # The verified 0.9.8-era LTXVideo revision does not
+    # contain pyramid_blending.py, so there is nothing to patch.
     if not pyramid_file.exists():
-
         print(
-            "✅ No pyramid_blending.py in the pinned "
-            "LTXVideo revision."
+            "✅ Pinned LTXVideo revision has no "
+            "pyramid_blending.py; Kornia patch not required."
         )
-
-        print(
-            "✅ Kornia compatibility patch not required."
-        )
-
         return
-
-    print(
-        f"Found:\n{pyramid_file}"
-    )
-
-    # --------------------------------------------------------
-    # Modern LTXVideo compatibility patch
-    # --------------------------------------------------------
 
     text = pyramid_file.read_text(
         encoding="utf-8"
@@ -791,64 +854,7 @@ def patch_ltx_kornia_compatibility():
 
     original = text
 
-    # Remove the obsolete Kornia pad import.
-    text = text.replace(
-        "        pad,\n",
-        "",
-    )
-
-    # Ensure torch.nn.functional is available.
-    if (
-        "import torch.nn.functional as F"
-        not in text
-    ):
-
-        text = text.replace(
-            "import torch\n",
-            "import torch\n"
-            "import torch.nn.functional as F\n",
-            1,
-        )
-
-    # Provide the compatibility alias used by the
-    # modern LTXVideo implementation.
-    if (
-        "pad = F.pad"
-        not in text
-    ):
-
-        marker = (
-            "import torch.nn.functional as F\n"
-        )
-
-        text = text.replace(
-            marker,
-            marker +
-            "\n"
-            "# Kornia >= 0.8.3 compatibility\n"
-            "pad = F.pad\n",
-            1,
-        )
-
-    if text != original:
-
-        pyramid_file.write_text(
-            text,
-            encoding="utf-8",
-        )
-
-        print(
-            "✅ Applied Kornia compatibility patch."
-        )
-
-    else:
-
-        print(
-            "✅ Kornia compatibility already applied."
-        )
-    return
-
-    old_block = """from kornia.geometry.transform.pyramid import (
+    old_import = """from kornia.geometry.transform.pyramid import (
     PyrUp,
     build_laplacian_pyramid,
     build_pyramid,
@@ -857,7 +863,7 @@ def patch_ltx_kornia_compatibility():
     pad,
 )"""
 
-    new_block = """from kornia.geometry.transform.pyramid import (
+    new_import = """from kornia.geometry.transform.pyramid import (
     PyrUp,
     build_laplacian_pyramid,
     build_pyramid,
@@ -865,65 +871,40 @@ def patch_ltx_kornia_compatibility():
     is_powerof_two,
 )"""
 
-    if old_block not in text:
-
-        # The source may have changed and no longer need
-        # the compatibility patch.
-        if (
-            "from kornia.geometry.transform.pyramid"
-            not in text
-        ):
-
-            print(
-                "✅ LTXVideo is not using the affected "
-                "Kornia import."
-            )
-
-            return
-
-        raise RuntimeError(
-            "LTXVideo pyramid_blending.py uses a "
-            "different Kornia import layout than expected.\n\n"
-            "Refusing to modify the file blindly."
+    if old_import in text:
+        text = text.replace(
+            old_import,
+            new_import,
+            1,
         )
 
-    # Remove pad from Kornia import.
-    text = text.replace(
-        old_block,
-        new_block,
-        1,
-    )
-
-    # Ensure F is imported.
-    if (
-        "import torch.nn.functional as F"
-        not in text
+    elif (
+        "from kornia.geometry.transform.pyramid" in text
+        and "pad," in text
     ):
+        # Refuse to guess at an unexpected source layout.
+        raise RuntimeError(
+            "LTXVideo pyramid_blending.py uses an "
+            "unexpected Kornia import layout; refusing "
+            "to patch it blindly."
+        )
 
-        # Add after the torch import when possible.
+    if "import torch.nn.functional as F" not in text:
         if "import torch\n" in text:
-
             text = text.replace(
                 "import torch\n",
                 "import torch\n"
                 "import torch.nn.functional as F\n",
                 1,
             )
-
         else:
-
             text = (
                 "import torch.nn.functional as F\n"
                 + text
             )
 
-    # Add local pad implementation.
-    marker = (
-        "import torch.nn.functional as F"
-    )
-
     if "pad = F.pad" not in text:
-
+        marker = "import torch.nn.functional as F"
         text = text.replace(
             marker,
             marker
@@ -933,15 +914,18 @@ def patch_ltx_kornia_compatibility():
             1,
         )
 
-    ltx_file.write_text(
-        text,
-        encoding="utf-8",
-    )
-
-    print(
-        "✅ LTXVideo/Kornia compatibility "
-        "patch applied."
-    )
+    if text != original:
+        pyramid_file.write_text(
+            text,
+            encoding="utf-8",
+        )
+        print(
+            "✅ Applied LTXVideo/Kornia compatibility patch."
+        )
+    else:
+        print(
+            "✅ LTXVideo/Kornia compatibility already correct."
+        )
 
 
 # ============================================================
@@ -1041,49 +1025,82 @@ def verify_critical_imports():
             )
 
     # --------------------------------------------------------
-    # LTXVideo source check
+    # LTXVideo source / revision check
     # --------------------------------------------------------
 
-    ltx_file = (
+    ltx_dir = (
         COMFY
         / "custom_nodes"
         / "ComfyUI-LTXVideo"
-        / "pyramid_blending.py"
     )
 
-    if ltx_file.exists():
-
-        text = ltx_file.read_text(
-            encoding="utf-8"
-        )
-
-        if "pad = F.pad" in text:
-
-            print(
-                f"{'LTXVideo/Kornia':25} OK"
-            )
-
-        else:
-
-            failures.append(
-                (
-                    "LTXVideo/Kornia",
-                    "compatibility patch missing",
-                )
-            )
-
-            print(
-                f"{'LTXVideo/Kornia':25} FAILED"
-            )
-
-    else:
+    if not ltx_dir.exists():
 
         failures.append(
             (
                 "LTXVideo",
-                "pyramid_blending.py missing",
+                "custom node directory is missing",
             )
         )
+
+        print(
+            f"{'LTXVideo':25} FAILED"
+        )
+
+    else:
+
+        current = get_git_commit(ltx_dir)
+
+        if current != LTXVIDEO_COMMIT:
+
+            failures.append(
+                (
+                    "LTXVideo revision",
+                    f"expected {LTXVIDEO_COMMIT}, found {current}",
+                )
+            )
+
+            print(
+                f"{'LTXVideo revision':25} FAILED"
+            )
+
+        else:
+
+            print(
+                f"{'LTXVideo revision':25} OK"
+            )
+
+        # pyramid_blending.py only needs compatibility validation
+        # when the installed revision actually contains it.
+        ltx_file = ltx_dir / "pyramid_blending.py"
+
+        if not ltx_file.exists():
+
+            print(
+                f"{'LTXVideo/Kornia':25} N/A (pinned revision has no pyramid_blending.py)"
+            )
+
+        else:
+
+            text = ltx_file.read_text(
+                encoding="utf-8"
+            )
+
+            if "pad = F.pad" in text:
+                print(
+                    f"{'LTXVideo/Kornia':25} OK"
+                )
+            else:
+                failures.append(
+                    (
+                        "LTXVideo/Kornia",
+                        "compatibility patch missing",
+                    )
+                )
+
+                print(
+                    f"{'LTXVideo/Kornia':25} FAILED"
+                )
 
     if failures:
 
@@ -1377,8 +1394,10 @@ def main():
     install_custom_node_requirements()
 
     # --------------------------------------------------------
-    # 6. LTXVideo/Kornia compatibility
+    # 6. LTXVideo revision / Kornia compatibility
     # --------------------------------------------------------
+
+    ensure_ltxvideo_revision()
 
     patch_ltx_kornia_compatibility()
 
