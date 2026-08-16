@@ -6,6 +6,14 @@ from planner.qwen_loader import (
     QwenStoryModel,
 )
 
+from schemas.scene import (
+    Scene,
+)
+
+from schemas.parser import (
+    extract_json,
+)
+
 
 class ScenePlanner:
 
@@ -17,7 +25,7 @@ class ScenePlanner:
         self,
         story: str,
         characters: list,
-    ) -> str:
+    ) -> list:
 
         project_root = (
             Path(__file__)
@@ -91,9 +99,63 @@ class ScenePlanner:
             },
         ]
 
-        return self.model.generate(
+        response = self.model.generate(
             messages
         )
+
+        data = extract_json(
+            response
+        )
+
+        scenes = []
+
+        for item in data.get(
+            "scenes",
+            [],
+        ):
+
+            scenes.append(
+                Scene(
+                    scene_id=item.get(
+                        "scene_id",
+                        f"scene_{len(scenes) + 1:03d}",
+                    ),
+                    order=item.get(
+                        "order",
+                        len(scenes) + 1,
+                    ),
+                    location=item.get(
+                        "location",
+                        "",
+                    ),
+                    time_of_day=item.get(
+                        "time_of_day",
+                        "",
+                    ),
+                    description=item.get(
+                        "description",
+                        "",
+                    ),
+                    characters=item.get(
+                        "characters",
+                        [],
+                    ),
+                    story_summary=item.get(
+                        "story_summary",
+                        "",
+                    ),
+                    continuity_notes=item.get(
+                        "continuity_notes",
+                        "",
+                    ),
+                    shot_ids=item.get(
+                        "shot_ids",
+                        [],
+                    ),
+                )
+            )
+
+        return scenes
 
     def unload(self):
 
