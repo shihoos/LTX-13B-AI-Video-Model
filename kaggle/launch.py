@@ -327,36 +327,81 @@ def start_tunnel():
             str(TUNNEL),
         ]
     )
-    
+
 def ensure_comfy_runtime_dependencies():
     """
-    Install missing ComfyUI runtime dependencies required by
-    the currently installed ComfyUI version.
-
-    Torch/CUDA packages are intentionally NOT modified.
+    Install missing runtime dependencies required by the
+    installed ComfyUI version without replacing the
+    known-good Torch/CUDA installation.
     """
 
     import importlib.util
 
     module_to_package = {
-    "comfy_aimdo": "comfy-aimdo",
-    "comfy_kitchen": "comfy-kitchen",
-    "torchsde": "torchsde",
-    "av": "av",
+        "comfy_aimdo": "comfy-aimdo",
+        "comfy_kitchen": "comfy-kitchen",
+        "torchsde": "torchsde",
+        "av": "av",
     }
 
-    missing_packages = []
+    missing_modules = []
 
-    for module_name, package_name in module_to_package.items():
-
+    for module_name in module_to_package:
         if importlib.util.find_spec(module_name) is None:
-            missing_packages.append(package_name)
+            missing_modules.append(module_name)
 
-    if not missing_packages:
+    if not missing_modules:
         print(
             "✅ ComfyUI runtime dependencies are present."
         )
         return
+
+    requirements = COMFY / "requirements.txt"
+
+    if not requirements.exists():
+        raise FileNotFoundError(
+            f"ComfyUI requirements file not found:\n{requirements}"
+        )
+
+    # Read the exact versions requested by this ComfyUI checkout.
+    package_lookup = {}
+
+    for line in requirements.read_text(
+        encoding="utf-8"
+    ).splitlines():
+
+        line = line.strip()
+
+        if not line or line.startswith("#"):
+            continue
+
+        normalized = (
+            line
+            .split("==")[0]
+            .split(">=")[0]
+            .split("<=")[0]
+            .split(">")[0]
+            .split("<")[0]
+            .strip()
+            .lower()
+        )
+
+        package_lookup[normalized] = line
+
+    packages = []
+
+    for module_name in missing_modules:
+
+        package_name = module_to_package[
+            module_name
+        ]
+
+        requirement = package_lookup.get(
+            package_name.lower(),
+            package_name,
+        )
+
+        packages.append(requirement)
 
     print()
     print("=" * 70)
@@ -365,53 +410,14 @@ def ensure_comfy_runtime_dependencies():
     )
     print("=" * 70)
 
-    requirements = (
-        COMFY / "requirements.txt"
+    print(
+        "Missing modules:",
+        missing_modules,
     )
-
-    if not requirements.exists():
-        raise FileNotFoundError(
-            f"ComfyUI requirements file not found:\n"
-            f"{requirements}"
-        )
-
-    lines = requirements.read_text(
-        encoding="utf-8"
-    ).splitlines()
-
-    package_lookup = {
-        line.split("==")[0]
-             .split(">=")[0]
-             .split("<=")[0]
-             .split(">")[0]
-             .split("<")[0]
-             .strip()
-             .lower(): line.strip()
-        for line in lines
-        if line.strip()
-        and not line.strip().startswith("#")
-    }
-
-    packages_to_install = []
-
-    for package_name in missing_packages:
-
-        normalized = package_name.lower()
-
-        if normalized in package_lookup:
-            packages_to_install.append(
-                package_lookup[normalized]
-            )
-        else:
-            # torchsde may not be present in a particular
-            # requirements revision, so allow pip to resolve it.
-            packages_to_install.append(
-                package_name
-            )
 
     print(
         "Installing:",
-        packages_to_install,
+        packages,
     )
 
     subprocess.run(
@@ -420,7 +426,7 @@ def ensure_comfy_runtime_dependencies():
             "-m",
             "pip",
             "install",
-            *packages_to_install,
+            *packages,
         ],
         check=True,
     )
@@ -428,6 +434,7 @@ def ensure_comfy_runtime_dependencies():
     print(
         "✅ Missing ComfyUI runtime dependencies installed."
     )
+
 def main():
 
     print()
