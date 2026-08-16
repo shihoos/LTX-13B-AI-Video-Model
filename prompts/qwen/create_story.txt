@@ -1,0 +1,26 @@
+Create a complete cinematic story from the user's request.
+
+The story should include:
+
+- Title
+- Genre
+- Theme
+- Premise
+- Main characters
+- Character motivations
+- Character arcs
+- Beginning
+- Rising conflict
+- Major turning point
+- Climax
+- Ending
+
+The story must be suitable for conversion into scenes and short AI-generated video shots.
+
+The story should maintain logical continuity.
+
+Do not create random scenes that do not contribute to the narrative.
+
+USER REQUEST:
+
+{user_request}
