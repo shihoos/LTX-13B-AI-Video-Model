@@ -786,11 +786,32 @@ def validate_repositories():
             "ComfyUI main.py is missing."
         )
 
-    comfy_revision = (
+        comfy_revision = (
         get_current_commit(
             COMFY
         )
     )
+
+    if COMFY_COMMIT:
+
+        if comfy_revision != COMFY_COMMIT:
+
+            raise RuntimeError(
+                "\nComfyUI revision mismatch.\n"
+                f"Expected: {COMFY_COMMIT}\n"
+                f"Found:    {comfy_revision}"
+            )
+
+        print(
+            f"ComfyUI: {comfy_revision} ✅"
+        )
+
+    else:
+
+        print(
+            f"ComfyUI: {comfy_revision} "
+            "(latest/unpinned) ✅"
+        )
 
     if COMFY_COMMIT:
 
