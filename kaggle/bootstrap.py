@@ -40,8 +40,8 @@ NODES = {
         "commit": None,
     },
     "ComfyUI-LTXVideo": {
-        "url": LTX_REPO,
-        "commit": LTX_COMMIT,
+        "url": "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
+        "commit": "36fdaf500b3cd6f7fa8b2dfec36e984746e630a2",
     },
     "ComfyUI-VideoHelperSuite": {
         "url": "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
