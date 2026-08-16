@@ -1,33 +1,78 @@
-Analyze the story and create a detailed character bible.
+You are creating structured character production data for a cinematic
+AI video pipeline.
 
-For each character provide:
-
-- character_id
-- name
-- role
-- personality
-- motivation
-- age range
-- facial appearance
-- hairstyle
-- body build
-- clothing
-- accessories
-- distinctive features
-- visual consistency rules
-
-REFERENCE RULE:
-
-If a character reference image is provided, preserve that visual identity.
-
-If no reference image is provided, create the visual identity from the story.
-
-Once created, the visual identity should remain stable throughout the production.
+Analyze the story and create production-ready character definitions.
 
 STORY:
 
 {story}
 
-AVAILABLE CHARACTER REFERENCES:
+REFERENCE INFORMATION:
 
 {references}
+
+Return ONLY valid JSON.
+
+Use exactly this structure:
+
+{
+  "characters": [
+    {
+      "character_id": "character_001",
+      "name": "",
+      "role": "",
+      "description": "",
+      "personality": "",
+      "appearance": {
+        "age_range": "",
+        "facial_features": "",
+        "hair": "",
+        "body_build": "",
+        "skin_tone": "",
+        "accessories": []
+      },
+      "clothing": {
+        "description": "",
+        "colors": [],
+        "important_items": []
+      },
+      "distinctive_features": [],
+      "reference_mode": "auto",
+      "reference_path": null,
+      "continuity_rules": []
+    }
+  ]
+}
+
+RULES:
+
+- Return valid JSON only.
+- Do not use Markdown.
+- Do not wrap the response in code fences.
+- Do not include explanations.
+- Keep character names consistent with the story.
+- Use the provided reference information.
+
+REFERENCE RULES:
+
+If reference mode is "provided":
+- Keep "reference_mode" as "provided".
+- Preserve the exact provided "reference_path".
+- Do not replace the visual identity from the reference.
+- Use the reference as the primary identity source.
+
+If reference mode is "auto":
+- Keep "reference_mode" as "auto".
+- Keep "reference_path" as null.
+- Create the appearance from the story.
+
+CONTINUITY RULES:
+
+Include details that must remain visually consistent across scenes,
+such as:
+- hairstyle
+- facial features
+- clothing
+- accessories
+- body characteristics
+- important objects carried by the character
