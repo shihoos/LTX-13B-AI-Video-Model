@@ -27,7 +27,7 @@ COMFY_REPO = (
 
 # None = follow the current default branch of ComfyUI.
 # This is intentional while testing modern ComfyUI.
-COMFY_COMMIT = None
+COMFY_COMMIT = "COMFY_COMMIT"
 
 # Keep the proven LTX 0.9.8-era node implementation.
 LTXVIDEO_COMMIT = (
