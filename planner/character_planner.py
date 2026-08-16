@@ -21,17 +21,20 @@ from schemas.parser import (
 
 class CharacterPlanner:
 
-    def __init__(self):
+    def __init__(
+    self,
+    model=None,
+    ):
 
-    self.model = QwenStoryModel()
+    self.model = (
+        model
+        if model is not None
+        else QwenStoryModel()
+    )
 
-        self.references = (
-            ReferenceManager()
-            )
-    
-            self.references = (
-                ReferenceManager()
-            )
+    self.references = (
+        ReferenceManager()
+    )
 
     def create_character_plan(
         self,
