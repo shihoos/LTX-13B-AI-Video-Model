@@ -792,18 +792,27 @@ def validate_repositories():
         )
     )
 
+    if COMFY_COMMIT:
+
     if comfy_revision != COMFY_COMMIT:
 
-        raise RuntimeError(
-            "\nComfyUI revision mismatch.\n"
-            f"Expected: {COMFY_COMMIT}\n"
-            f"Found:    {comfy_revision}"
+            raise RuntimeError(
+                "\nComfyUI revision mismatch.\n"
+                f"Expected: {COMFY_COMMIT}\n"
+                f"Found:    {comfy_revision}"
+            )
+    
+        print(
+            f"ComfyUI: {comfy_revision} ✅"
         )
 
-    print(
-        f"ComfyUI: {comfy_revision} ✅"
-    )
+    else:
 
+        print(
+            f"ComfyUI: {comfy_revision} "
+            "(latest/unpinned) ✅"
+    )
+        
     # --------------------------------------------------------
     # Custom nodes
     # --------------------------------------------------------
