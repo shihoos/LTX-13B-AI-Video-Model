@@ -1,8 +1,15 @@
 from pathlib import Path
+import importlib
+import importlib.util
+import os
 import socket
 import subprocess
 import sys
 
+
+# ============================================================
+# PROJECT PATHS
+# ============================================================
 
 PROJECT = Path(
     "/kaggle/working/LTX-13B-AI-Video-Model"
@@ -27,7 +34,21 @@ EXTRA_PATHS = (
 PORT = 8188
 
 
+# ============================================================
+# GPU REQUIREMENT
+# ============================================================
+
+MIN_GPUS = 2
+
+EXPECTED_TORCH_PREFIX = "2.10.0+cu128"
+
+
+# ============================================================
+# MODEL FILES
+# ============================================================
+
 MODEL_FILES = {
+
     "ltx_q4":
         "LTXV-13B-0.9.8-distilled-Q4_K_M.gguf",
 
@@ -45,10 +66,92 @@ MODEL_FILES = {
 }
 
 
-def run(command, cwd=None):
+# ============================================================
+# REQUIRED PYTHON MODULES
+#
+# These are the modules needed by:
+# - ComfyUI
+# - ComfyUI-GGUF
+# - ComfyUI-LTXVideo
+# - VideoHelperSuite
+#
+# Torch itself is deliberately NOT installed here.
+# ============================================================
+
+REQUIRED_MODULES = {
+
+    "comfy_aimdo":
+        "comfy-aimdo",
+
+    "comfy_kitchen":
+        "comfy-kitchen",
+
+    "torchsde":
+        "torchsde",
+
+    "av":
+        "av",
+
+    "gguf":
+        "gguf",
+
+    "spandrel":
+        "spandrel",
+
+    "simpleeval":
+        "simpleeval",
+
+    "comfy_angle":
+        "comfy-angle",
+}
+
+
+# These are separate ComfyUI packages that are checked with
+# pip because their package/module relationship is different.
+
+REQUIRED_COMFY_PACKAGES = {
+
+    "comfyui-frontend-package":
+        "comfyui-frontend-package",
+
+    "comfyui-workflow-templates":
+        "comfyui-workflow-templates",
+
+    "comfyui-embedded-docs":
+        "comfyui-embedded-docs",
+}
+
+
+# ============================================================
+# CUSTOM NODES
+# ============================================================
+
+REQUIRED_CUSTOM_NODES = [
+
+    "ComfyUI-GGUF",
+
+    "ComfyUI-LTXVideo",
+
+    "ComfyUI-VideoHelperSuite",
+
+    "rgthree-comfy",
+]
+
+
+# ============================================================
+# COMMAND HELPER
+# ============================================================
+
+def run(
+    command,
+    cwd=None,
+):
     print(
         "\n$",
-        " ".join(map(str, command)),
+        " ".join(
+            map(str, command)
+        ),
+        flush=True,
     )
 
     subprocess.run(
@@ -58,58 +161,852 @@ def run(command, cwd=None):
     )
 
 
+# ============================================================
+# GPU CHECK
+# ============================================================
+
 def check_gpu():
 
     import torch
 
+    print()
     print("=" * 70)
     print("GPU / CUDA CHECK")
     print("=" * 70)
 
-    print("Torch:", torch.__version__)
-    print("CUDA:", torch.version.cuda)
+    print(
+        "Torch:",
+        torch.__version__,
+    )
+
+    print(
+        "CUDA:",
+        torch.version.cuda,
+    )
+
     print(
         "CUDA available:",
         torch.cuda.is_available(),
     )
 
     if not torch.cuda.is_available():
+
         raise RuntimeError(
-            "CUDA is unavailable."
+            "CUDA is not available."
         )
 
-    count = torch.cuda.device_count()
+    gpu_count = (
+        torch.cuda.device_count()
+    )
 
-    print("GPU count:", count)
+    print(
+        "GPU count:",
+        gpu_count,
+    )
 
-    if count < 2:
+    if gpu_count < MIN_GPUS:
+
         raise RuntimeError(
-            "This project requires 2 GPUs."
+            f"This project requires at least "
+            f"{MIN_GPUS} GPUs, but only "
+            f"{gpu_count} were detected."
         )
 
-    for i in range(count):
+    for index in range(gpu_count):
+
         print(
-            f"GPU {i}:",
-            torch.cuda.get_device_name(i),
+            f"GPU {index}:",
+            torch.cuda.get_device_name(index),
         )
 
+    # Do not silently replace the known-good Torch stack.
+    if not torch.__version__.startswith(
+        EXPECTED_TORCH_PREFIX
+    ):
+
+        raise RuntimeError(
+            "\nUnexpected PyTorch version.\n"
+            f"Expected: {EXPECTED_TORCH_PREFIX}...\n"
+            f"Found:    {torch.__version__}\n\n"
+            "This launcher intentionally refuses "
+            "to replace the existing Torch/CUDA "
+            "installation."
+        )
+
+
+# ============================================================
+# REPOSITORY CHECK
+# ============================================================
+
+def ensure_repository():
+
+    if PROJECT.exists():
+
+        print(
+            "✅ Project repository already exists."
+        )
+
+        return
+
+    raise RuntimeError(
+        "\nThe project repository does not exist:\n"
+        f"{PROJECT}\n\n"
+        "Use the notebook's one-cell startup "
+        "cell to clone GitHub first."
+    )
+
+
+# ============================================================
+# COMFYUI CHECK / BOOTSTRAP
+# ============================================================
+
+def ensure_comfyui():
+
+    main_py = (
+        COMFY / "main.py"
+    )
+
+    if main_py.exists():
+
+        print(
+            "✅ ComfyUI installation found."
+        )
+
+        return
+
+    print()
+    print(
+        "⚠️ ComfyUI installation missing."
+    )
+
+    if not BOOTSTRAP.exists():
+
+        raise FileNotFoundError(
+            f"Bootstrap script not found:\n"
+            f"{BOOTSTRAP}"
+        )
+
+    print(
+        "Running bootstrap.py..."
+    )
+
+    run(
+        [
+            sys.executable,
+            str(BOOTSTRAP),
+        ]
+    )
+
+    if not main_py.exists():
+
+        raise RuntimeError(
+            "Bootstrap completed, but "
+            "ComfyUI/main.py was not created."
+        )
+
+    print(
+        "✅ ComfyUI installed successfully."
+    )
+
+
+# ============================================================
+# PACKAGE VERSION LOOKUP
+# ============================================================
+
+def build_requirement_lookup():
+
+    requirements = (
+        COMFY / "requirements.txt"
+    )
+
+    if not requirements.exists():
+
+        raise FileNotFoundError(
+            f"ComfyUI requirements.txt not found:\n"
+            f"{requirements}"
+        )
+
+    lookup = {}
+
+    for raw_line in requirements.read_text(
+        encoding="utf-8"
+    ).splitlines():
+
+        line = raw_line.strip()
+
+        if (
+            not line
+            or line.startswith("#")
+        ):
+            continue
+
+        # Remove inline comments.
+        line = line.split(
+            " #",
+            1,
+        )[0].strip()
+
+        normalized = (
+            line
+            .split("==", 1)[0]
+            .split(">=", 1)[0]
+            .split("<=", 1)[0]
+            .split("~=", 1)[0]
+            .split(">", 1)[0]
+            .split("<", 1)[0]
+            .strip()
+            .lower()
+        )
+
+        lookup[normalized] = line
+
+    return lookup
+
+
+# ============================================================
+# REQUIRED PACKAGE CHECK
+# ============================================================
+
+def package_installed(
+    package_name,
+):
+    """
+    Check pip package installation without importing it.
+    """
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "show",
+            package_name,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+    return result.returncode == 0
+
+
+# ============================================================
+# RUNTIME DEPENDENCY REPAIR
+# ============================================================
+
+def ensure_runtime_dependencies():
+
+    print()
+    print("=" * 70)
+    print(
+        "CHECKING COMFYUI RUNTIME DEPENDENCIES"
+    )
+    print("=" * 70)
+
+    requirement_lookup = (
+        build_requirement_lookup()
+    )
+
+    packages_to_install = []
+
+    # --------------------------------------------------------
+    # Python modules
+    # --------------------------------------------------------
+
+    for module_name, package_name in (
+        REQUIRED_MODULES.items()
+    ):
+
+        if importlib.util.find_spec(
+            module_name
+        ) is not None:
+
+            continue
+
+        requirement = (
+            requirement_lookup.get(
+                package_name.lower(),
+                package_name,
+            )
+        )
+
+        packages_to_install.append(
+            requirement
+        )
+
+        print(
+            f"MISSING MODULE: "
+            f"{module_name} "
+            f"→ {requirement}"
+        )
+
+    # --------------------------------------------------------
+    # ComfyUI packages
+    # --------------------------------------------------------
+
+    for package_name in (
+        REQUIRED_COMFY_PACKAGES.values()
+    ):
+
+        if package_installed(
+            package_name
+        ):
+
+            continue
+
+        requirement = (
+            requirement_lookup.get(
+                package_name.lower(),
+                package_name,
+            )
+        )
+
+        packages_to_install.append(
+            requirement
+        )
+
+        print(
+            f"MISSING PACKAGE: "
+            f"{package_name} "
+            f"→ {requirement}"
+        )
+
+    # Remove duplicates.
+    packages_to_install = list(
+        dict.fromkeys(
+            packages_to_install
+        )
+    )
+
+    if not packages_to_install:
+
+        print(
+            "✅ All required runtime packages "
+            "are installed."
+        )
+
+        return
+
+    print()
+    print(
+        "Installing:",
+        packages_to_install,
+    )
+
+    # IMPORTANT:
+    # Never install torch/torchvision/torchaudio here.
+    forbidden = {
+        "torch",
+        "torchvision",
+        "torchaudio",
+    }
+
+    safe_packages = []
+
+    for package in packages_to_install:
+
+        normalized = (
+            package
+            .split("==", 1)[0]
+            .split(">=", 1)[0]
+            .split("<=", 1)[0]
+            .split("~=", 1)[0]
+            .strip()
+            .lower()
+        )
+
+        if normalized in forbidden:
+            continue
+
+        safe_packages.append(
+            package
+        )
+
+    if safe_packages:
+
+        run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                *safe_packages,
+            ]
+        )
+
+    print(
+        "✅ Runtime dependency repair complete."
+    )
+
+
+# ============================================================
+# CUSTOM NODE REQUIREMENTS
+# ============================================================
+
+def install_custom_node_requirements():
+
+    print()
+    print("=" * 70)
+    print(
+        "CHECKING CUSTOM-NODE DEPENDENCIES"
+    )
+    print("=" * 70)
+
+    custom_nodes_dir = (
+        COMFY / "custom_nodes"
+    )
+
+    forbidden = {
+        "torch",
+        "torchvision",
+        "torchaudio",
+    }
+
+    for node_name in (
+        REQUIRED_CUSTOM_NODES
+    ):
+
+        node_dir = (
+            custom_nodes_dir
+            / node_name
+        )
+
+        requirements = (
+            node_dir / "requirements.txt"
+        )
+
+        if not requirements.exists():
+
+            print(
+                f"{node_name}: "
+                "no requirements.txt"
+            )
+
+            continue
+
+        filtered_lines = []
+
+        for raw_line in (
+            requirements.read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ):
+
+            line = raw_line.strip()
+
+            if (
+                not line
+                or line.startswith("#")
+            ):
+                continue
+
+            package_name = (
+                line
+                .split("==", 1)[0]
+                .split(">=", 1)[0]
+                .split("<=", 1)[0]
+                .split("~=", 1)[0]
+                .split(">", 1)[0]
+                .split("<", 1)[0]
+                .strip()
+                .lower()
+            )
+
+            if package_name in forbidden:
+                continue
+
+            filtered_lines.append(
+                line
+            )
+
+        if not filtered_lines:
+
+            print(
+                f"{node_name}: "
+                "no additional dependencies"
+            )
+
+            continue
+
+        temp_requirements = (
+            PROJECT
+            / f".{node_name}_requirements.txt"
+        )
+
+        temp_requirements.write_text(
+            "\n".join(
+                filtered_lines
+            ) + "\n",
+            encoding="utf-8",
+        )
+
+        print(
+            f"Installing requirements for "
+            f"{node_name}..."
+        )
+
+        run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-q",
+                "-r",
+                str(temp_requirements),
+            ]
+        )
+
+        try:
+            temp_requirements.unlink()
+        except OSError:
+            pass
+
+    print(
+        "✅ Custom-node dependency setup complete."
+    )
+
+
+# ============================================================
+# LTXVIDEO / KORNIA COMPATIBILITY
+# ============================================================
+
+def patch_ltx_kornia_compatibility():
+
+    print()
+    print("=" * 70)
+    print(
+        "CHECKING LTXVIDEO / KORNIA COMPATIBILITY"
+    )
+    print("=" * 70)
+
+    ltx_file = (
+        COMFY
+        / "custom_nodes"
+        / "ComfyUI-LTXVideo"
+        / "pyramid_blending.py"
+    )
+
+    if not ltx_file.exists():
+
+        raise FileNotFoundError(
+            "LTXVideo pyramid_blending.py "
+            "was not found:\n"
+            f"{ltx_file}"
+        )
+
+    text = ltx_file.read_text(
+        encoding="utf-8"
+    )
+
+    # --------------------------------------------------------
+    # Already patched
+    # --------------------------------------------------------
+
+    if "pad = F.pad" in text:
+
+        print(
+            "✅ LTXVideo/Kornia patch already applied."
+        )
+
+        return
+
+    old_block = """from kornia.geometry.transform.pyramid import (
+    PyrUp,
+    build_laplacian_pyramid,
+    build_pyramid,
+    find_next_powerof_two,
+    is_powerof_two,
+    pad,
+)"""
+
+    new_block = """from kornia.geometry.transform.pyramid import (
+    PyrUp,
+    build_laplacian_pyramid,
+    build_pyramid,
+    find_next_powerof_two,
+    is_powerof_two,
+)"""
+
+    if old_block not in text:
+
+        # The source may have changed and no longer need
+        # the compatibility patch.
+        if (
+            "from kornia.geometry.transform.pyramid"
+            not in text
+        ):
+
+            print(
+                "✅ LTXVideo is not using the affected "
+                "Kornia import."
+            )
+
+            return
+
+        raise RuntimeError(
+            "LTXVideo pyramid_blending.py uses a "
+            "different Kornia import layout than expected.\n\n"
+            "Refusing to modify the file blindly."
+        )
+
+    # Remove pad from Kornia import.
+    text = text.replace(
+        old_block,
+        new_block,
+        1,
+    )
+
+    # Ensure F is imported.
+    if (
+        "import torch.nn.functional as F"
+        not in text
+    ):
+
+        # Add after the torch import when possible.
+        if "import torch\n" in text:
+
+            text = text.replace(
+                "import torch\n",
+                "import torch\n"
+                "import torch.nn.functional as F\n",
+                1,
+            )
+
+        else:
+
+            text = (
+                "import torch.nn.functional as F\n"
+                + text
+            )
+
+    # Add local pad implementation.
+    marker = (
+        "import torch.nn.functional as F"
+    )
+
+    if "pad = F.pad" not in text:
+
+        text = text.replace(
+            marker,
+            marker
+            + "\n\n"
+            + "# Kornia >= 0.8.3 compatibility.\n"
+            + "pad = F.pad",
+            1,
+        )
+
+    ltx_file.write_text(
+        text,
+        encoding="utf-8",
+    )
+
+    print(
+        "✅ LTXVideo/Kornia compatibility "
+        "patch applied."
+    )
+
+
+# ============================================================
+# CRITICAL IMPORT VALIDATION
+# ============================================================
+
+def verify_critical_imports():
+
+    print()
+    print("=" * 70)
+    print(
+        "VERIFYING CRITICAL IMPORTS"
+    )
+    print("=" * 70)
+
+    modules = [
+
+        "comfy_aimdo",
+
+        "comfy_kitchen",
+
+        "torchsde",
+
+        "av",
+
+        "gguf",
+
+        "spandrel",
+
+        "simpleeval",
+
+        "comfy_angle",
+    ]
+
+    failures = []
+
+    for module_name in modules:
+
+        try:
+
+            importlib.import_module(
+                module_name
+            )
+
+            print(
+                f"{module_name:25} OK"
+            )
+
+        except Exception as exc:
+
+            failures.append(
+                (
+                    module_name,
+                    str(exc),
+                )
+            )
+
+            print(
+                f"{module_name:25} FAILED"
+            )
+
+            print(
+                f"  {exc}"
+            )
+
+    # --------------------------------------------------------
+    # ComfyUI package checks
+    # --------------------------------------------------------
+
+    package_checks = [
+        "comfyui-frontend-package",
+        "comfyui-workflow-templates",
+        "comfyui-embedded-docs",
+    ]
+
+    for package in package_checks:
+
+        if package_installed(
+            package
+        ):
+
+            print(
+                f"{package:25} OK"
+            )
+
+        else:
+
+            failures.append(
+                (
+                    package,
+                    "package is not installed",
+                )
+            )
+
+            print(
+                f"{package:25} FAILED"
+            )
+
+    # --------------------------------------------------------
+    # LTXVideo source check
+    # --------------------------------------------------------
+
+    ltx_file = (
+        COMFY
+        / "custom_nodes"
+        / "ComfyUI-LTXVideo"
+        / "pyramid_blending.py"
+    )
+
+    if ltx_file.exists():
+
+        text = ltx_file.read_text(
+            encoding="utf-8"
+        )
+
+        if "pad = F.pad" in text:
+
+            print(
+                f"{'LTXVideo/Kornia':25} OK"
+            )
+
+        else:
+
+            failures.append(
+                (
+                    "LTXVideo/Kornia",
+                    "compatibility patch missing",
+                )
+            )
+
+            print(
+                f"{'LTXVideo/Kornia':25} FAILED"
+            )
+
+    else:
+
+        failures.append(
+            (
+                "LTXVideo",
+                "pyramid_blending.py missing",
+            )
+        )
+
+    if failures:
+
+        message = [
+            "",
+            "=" * 70,
+            "CRITICAL DEPENDENCY CHECK FAILED",
+            "=" * 70,
+            "",
+        ]
+
+        for name, error in failures:
+
+            message.append(
+                f"{name}: {error}"
+            )
+
+        message.extend(
+            [
+                "",
+                "ComfyUI was NOT started.",
+                "Fix the above environment issue first.",
+                "",
+            ]
+        )
+
+        raise RuntimeError(
+            "\n".join(message)
+        )
+
+    print()
+    print(
+        "✅ All critical imports/packages passed."
+    )
+
+
+# ============================================================
+# MODEL DISCOVERY
+# ============================================================
 
 def find_model(filename):
 
-    root = Path("/kaggle/input")
+    root = Path(
+        "/kaggle/input"
+    )
 
     matches = list(
         root.rglob(filename)
     )
 
     if not matches:
+
         raise FileNotFoundError(
-            f"\nModel file not found:\n"
-            f"{filename}\n"
-            f"Search root: {root}"
+            "\nModel file not found:\n"
+            f"{filename}\n\n"
+            f"Search root:\n{root}"
         )
 
     if len(matches) > 1:
+
         print(
             f"WARNING: multiple copies found "
             f"for {filename}"
@@ -129,12 +1026,16 @@ def find_all_models():
 
     print()
     print("=" * 70)
-    print("SEARCHING KAGGLE MODEL DATASETS")
+    print(
+        "SEARCHING KAGGLE MODEL DATASETS"
+    )
     print("=" * 70)
 
     models = {}
 
-    for key, filename in MODEL_FILES.items():
+    for key, filename in (
+        MODEL_FILES.items()
+    ):
 
         models[key] = find_model(
             filename
@@ -143,12 +1044,22 @@ def find_all_models():
     return models
 
 
-def create_model_paths(models):
+# ============================================================
+# COMFYUI MODEL PATHS
+# ============================================================
+
+def create_model_paths(
+    models
+):
 
     ltx_q4 = models["ltx_q4"]
+
     vae = models["vae"]
+
     t5 = models["t5"]
+
     detailer = models["detailer"]
+
     upscaler = models["upscaler"]
 
     config = f"""# Automatically generated by kaggle/launch.py
@@ -189,34 +1100,39 @@ ltx_project:
         "✅ Created ComfyUI model configuration:"
     )
 
-    print(EXTRA_PATHS)
+    print(
+        EXTRA_PATHS
+    )
 
+
+# ============================================================
+# CUSTOM NODE CHECK
+# ============================================================
 
 def verify_nodes():
 
-    required = [
-        "ComfyUI-GGUF",
-        "ComfyUI-LTXVideo",
-        "ComfyUI-VideoHelperSuite",
-        "rgthree-comfy",
-    ]
+    print()
+    print("=" * 70)
+    print(
+        "CUSTOM NODE CHECK"
+    )
+    print("=" * 70)
 
     custom_nodes = (
         COMFY / "custom_nodes"
     )
 
-    print()
-    print("=" * 70)
-    print("CUSTOM NODE CHECK")
-    print("=" * 70)
+    for node in REQUIRED_CUSTOM_NODES:
 
-    for node in required:
-
-        path = custom_nodes / node
+        path = (
+            custom_nodes / node
+        )
 
         if not path.exists():
+
             raise RuntimeError(
-                f"Missing custom node:\n{node}"
+                f"Missing custom node:\n"
+                f"{node}"
             )
 
         print(
@@ -224,85 +1140,32 @@ def verify_nodes():
         )
 
 
-def ensure_repository():
-
-    if PROJECT.exists():
-
-        print(
-            "✅ Project repository already exists."
-        )
-
-        return
-
-    print(
-        "Repository not found."
-    )
-
-    print(
-        "This means Kaggle started a new "
-        "working session."
-    )
-
-    print(
-        "The notebook startup cell will clone "
-        "the repository first."
-    )
-
-    raise RuntimeError(
-        "Repository must be cloned before "
-        "launch.py is executed."
-    )
-
-
-def ensure_comfyui():
-
-    main_py = COMFY / "main.py"
-
-    if main_py.exists():
-
-        print(
-            "✅ ComfyUI installation found."
-        )
-
-        return
-
-    print(
-        "⚠️ ComfyUI not found."
-    )
-
-    print(
-        "Running bootstrap..."
-    )
-
-    run(
-        [
-            sys.executable,
-            str(BOOTSTRAP),
-        ]
-    )
-
-    if not main_py.exists():
-
-        raise RuntimeError(
-            "Bootstrap completed but "
-            "ComfyUI/main.py was not found."
-        )
-
+# ============================================================
+# PORT CHECK
+# ============================================================
 
 def port_open():
 
     try:
 
         with socket.create_connection(
-            ("127.0.0.1", PORT),
+            (
+                "127.0.0.1",
+                PORT,
+            ),
             timeout=1,
         ):
+
             return True
 
     except OSError:
 
         return False
 
+
+# ============================================================
+# START COMFYUI + CLOUDFLARE
+# ============================================================
 
 def start_tunnel():
 
@@ -328,186 +1191,11 @@ def start_tunnel():
         ]
     )
 
-def ensure_comfy_runtime_dependencies():
-    """
-    Install runtime dependencies required by the installed
-    ComfyUI version without replacing the known-good
-    Torch/CUDA environment.
-    """
 
-    import importlib.util
+# ============================================================
+# MAIN
+# ============================================================
 
-    module_to_package = {
-        "comfy_aimdo": "comfy-aimdo",
-        "comfy_kitchen": "comfy-kitchen",
-        "torchsde": "torchsde",
-        "av": "av",
-    }
-
-    missing_modules = []
-
-    for module_name in module_to_package:
-        if importlib.util.find_spec(module_name) is None:
-            missing_modules.append(module_name)
-
-    # --------------------------------------------------------
-    # Check ComfyUI frontend separately.
-    # The frontend is a pip package and may not correspond
-    # directly to a Python importable module name.
-    # --------------------------------------------------------
-
-    frontend_package = (
-        "comfyui-frontend-package"
-    )
-
-    frontend_check = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "show",
-            frontend_package,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
-
-    frontend_missing = (
-        frontend_check.returncode != 0
-    )
-
-    if (
-        not missing_modules
-        and not frontend_missing
-    ):
-        print(
-            "✅ ComfyUI runtime dependencies are present."
-        )
-        return
-
-    requirements = (
-        COMFY / "requirements.txt"
-    )
-
-    if not requirements.exists():
-        raise FileNotFoundError(
-            f"ComfyUI requirements file not found:\n"
-            f"{requirements}"
-        )
-
-    # --------------------------------------------------------
-    # Read exact package versions requested by this
-    # ComfyUI checkout.
-    # --------------------------------------------------------
-
-    package_lookup = {}
-
-    for line in requirements.read_text(
-        encoding="utf-8"
-    ).splitlines():
-
-        line = line.strip()
-
-        if (
-            not line
-            or line.startswith("#")
-        ):
-            continue
-
-        normalized = (
-            line
-            .split("==")[0]
-            .split(">=")[0]
-            .split("<=")[0]
-            .split(">")[0]
-            .split("<")[0]
-            .strip()
-            .lower()
-        )
-
-        package_lookup[normalized] = line
-
-    packages = []
-
-    # --------------------------------------------------------
-    # Missing Python modules
-    # --------------------------------------------------------
-
-    for module_name in missing_modules:
-
-        package_name = (
-            module_to_package[
-                module_name
-            ]
-        )
-
-        requirement = package_lookup.get(
-            package_name.lower(),
-            package_name,
-        )
-
-        packages.append(requirement)
-
-    # --------------------------------------------------------
-    # Missing ComfyUI frontend
-    # --------------------------------------------------------
-
-    if frontend_missing:
-
-        frontend_requirement = package_lookup.get(
-            frontend_package,
-            frontend_package,
-        )
-
-        packages.append(
-            frontend_requirement
-        )
-
-    # Remove duplicates while preserving order.
-    packages = list(
-        dict.fromkeys(packages)
-    )
-
-    print()
-    print("=" * 70)
-    print(
-        "INSTALLING MISSING COMFYUI RUNTIME DEPENDENCIES"
-    )
-    print("=" * 70)
-
-    if missing_modules:
-        print(
-            "Missing modules:",
-            missing_modules,
-        )
-
-    if frontend_missing:
-        print(
-            "Missing package:",
-            frontend_package,
-        )
-
-    print(
-        "Installing:",
-        packages,
-    )
-
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            *packages,
-        ],
-        check=True,
-    )
-
-    print(
-        "✅ Missing ComfyUI runtime dependencies installed."
-    )
-    
 def main():
 
     print()
@@ -520,34 +1208,96 @@ def main():
     )
     print("=" * 70)
 
+    # --------------------------------------------------------
+    # 1. GPU / Torch
+    # --------------------------------------------------------
+
     check_gpu()
+
+    # --------------------------------------------------------
+    # 2. Repository
+    # --------------------------------------------------------
 
     ensure_repository()
 
+    # --------------------------------------------------------
+    # 3. ComfyUI
+    # --------------------------------------------------------
+
     ensure_comfyui()
 
-    ensure_comfy_runtime_dependencies()
-    
+    # --------------------------------------------------------
+    # 4. Runtime dependencies
+    # --------------------------------------------------------
+
+    ensure_runtime_dependencies()
+
+    # --------------------------------------------------------
+    # 5. Custom-node requirements
+    # --------------------------------------------------------
+
+    install_custom_node_requirements()
+
+    # --------------------------------------------------------
+    # 6. LTXVideo/Kornia compatibility
+    # --------------------------------------------------------
+
+    patch_ltx_kornia_compatibility()
+
+    # --------------------------------------------------------
+    # 7. Critical import validation
+    # --------------------------------------------------------
+
+    verify_critical_imports()
+
+    # --------------------------------------------------------
+    # 8. Model discovery
+    # --------------------------------------------------------
+
     models = find_all_models()
+
+    # --------------------------------------------------------
+    # 9. ComfyUI model configuration
+    # --------------------------------------------------------
 
     create_model_paths(
         models
     )
 
+    # --------------------------------------------------------
+    # 10. Custom nodes
+    # --------------------------------------------------------
+
     verify_nodes()
+
+    # --------------------------------------------------------
+    # 11. Already-running protection
+    # --------------------------------------------------------
 
     if port_open():
 
         print()
         print(
             "✅ ComfyUI is already running "
-            "on port 8188."
+            f"on port {PORT}."
+        )
+
+        print(
+            "No second instance will be started."
         )
 
         return
 
+    # --------------------------------------------------------
+    # 12. Start ComfyUI + tunnel
+    # --------------------------------------------------------
+
     start_tunnel()
 
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
 
 if __name__ == "__main__":
     main()
