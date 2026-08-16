@@ -148,27 +148,30 @@ def clone_repo(
     )
 
     if commit:
-
+        print(
+            f"Fetching full history for pinned commit: {commit}"
+        )
+    
         run(
             [
                 "git",
                 "fetch",
-                "--depth",
-                "50",
-                "origin",
+                "--all",
+                "--tags",
+                "--prune",
             ],
             cwd=destination,
         )
-
+    
         run(
             [
                 "git",
                 "checkout",
+                "--force",
                 commit,
             ],
             cwd=destination,
         )
-
 
 # ============================================================
 # TORCH VERIFICATION
