@@ -19,37 +19,66 @@ class ComfyWorkflowAdapter:
         - VHS_LoadVideo.video
     """
 
-    # UI/documentation nodes that must not be sent to the ComfyUI API.
+    # UI/documentation nodes that must not be sent to the
+    # ComfyUI execution API.
     UI_ONLY_NODE_TYPES = {
         "Note",
     }
 
-    def __init__(self, workflow_path: str | Path):
-        self.workflow_path = Path(workflow_path)
+    # UI-only widget values that should not be copied into
+    # the execution API prompt.
+    #
+    # These are editor controls / display metadata rather than
+    # executable node inputs.
+    UI_ONLY_WIDGET_NAMES = {
+        "upload",
+        "choose video to upload",
+        "videopreview",
+        "control_after_generate",
+    }
+
+    def __init__(
+        self,
+        workflow_path: str | Path,
+    ):
+        self.workflow_path = Path(
+            workflow_path
+        )
 
         if not self.workflow_path.exists():
             raise FileNotFoundError(
-                f"Workflow does not exist: {self.workflow_path}"
+                f"Workflow does not exist: "
+                f"{self.workflow_path}"
             )
 
-        with self.workflow_path.open("r", encoding="utf-8") as file:
-            self.workflow_json = json.load(file)
+        with self.workflow_path.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+            self.workflow_json = json.load(
+                file
+            )
 
     # ============================================================
-    # WORKFLOW -> COMFYUI API PROMPT
+    # WORKFLOW → COMFYUI API PROMPT
     # ============================================================
 
-    def to_api_workflow(self) -> dict[str, Any]:
+    def to_api_workflow(
+        self,
+    ) -> dict[str, Any]:
         """
-        Convert a normal ComfyUI graph JSON into the API prompt format.
+        Convert a normal ComfyUI graph JSON into
+        the API prompt format.
 
         Normal workflow format:
+
             {
                 "nodes": [...],
                 "links": [...]
             }
 
         API prompt format:
+
             {
                 "node_id": {
                     "class_type": "...",
@@ -60,20 +89,35 @@ class ComfyWorkflowAdapter:
 
         workflow = self.workflow_json
 
-        if self._is_api_workflow(workflow):
-            return copy.deepcopy(workflow)
-
-        if not isinstance(workflow, dict):
-            raise RuntimeError(
-                f"Workflow must be a dictionary: {self.workflow_path}"
+        # Already API-format.
+        if self._is_api_workflow(
+            workflow
+        ):
+            return copy.deepcopy(
+                workflow
             )
 
-        nodes = workflow.get("nodes")
-
-        if not isinstance(nodes, list):
+        if not isinstance(
+            workflow,
+            dict,
+        ):
             raise RuntimeError(
-                f"Workflow is neither a valid ComfyUI graph nor "
-                f"an API workflow: {self.workflow_path}"
+                "Workflow must be a dictionary: "
+                f"{self.workflow_path}"
+            )
+
+        nodes = workflow.get(
+            "nodes"
+        )
+
+        if not isinstance(
+            nodes,
+            list,
+        ):
+            raise RuntimeError(
+                "Workflow is neither a valid "
+                "ComfyUI graph nor an API workflow: "
+                f"{self.workflow_path}"
             )
 
         # --------------------------------------------------------
@@ -82,149 +126,286 @@ class ComfyWorkflowAdapter:
         # link_id -> [source_node_id, source_output_index]
         # --------------------------------------------------------
 
-        link_lookup: dict[int, list[Any]] = {}
+        link_lookup: dict[
+            int,
+            list[Any],
+        ] = {}
 
-        for link in workflow.get("links", []):
+        for link in workflow.get(
+            "links",
+            [],
+        ):
 
-            if not isinstance(link, list) or len(link) < 5:
+            if (
+                not isinstance(
+                    link,
+                    list,
+                )
+                or len(link) < 5
+            ):
                 continue
 
             link_id = link[0]
-            source_node_id = str(link[1])
+            source_node_id = str(
+                link[1]
+            )
             source_output_index = link[2]
 
-            link_lookup[link_id] = [
+            link_lookup[
+                link_id
+            ] = [
                 source_node_id,
                 source_output_index,
             ]
 
-        api_workflow: dict[str, Any] = {}
+        # --------------------------------------------------------
+        # IDs of executable nodes.
+        # Used to make sure a real node never points at a
+        # skipped UI-only node.
+        # --------------------------------------------------------
+
+        executable_node_ids = {
+            str(
+                node.get("id")
+            )
+            for node in nodes
+            if (
+                isinstance(
+                    node,
+                    dict,
+                )
+                and node.get("id") is not None
+                and node.get("type")
+                not in self.UI_ONLY_NODE_TYPES
+            )
+        }
+
+        api_workflow: dict[
+            str,
+            Any,
+        ] = {}
 
         for node in nodes:
 
-            if not isinstance(node, dict):
+            if not isinstance(
+                node,
+                dict,
+            ):
                 continue
 
-            node_id_value = node.get("id")
-            class_type = node.get("type")
+            node_id_value = node.get(
+                "id"
+            )
+
+            class_type = node.get(
+                "type"
+            )
 
             if node_id_value is None:
                 raise RuntimeError(
-                    "Workflow contains a node without an ID."
+                    "Workflow contains a node "
+                    "without an ID."
                 )
 
             if not class_type:
                 raise RuntimeError(
-                    f"Node {node_id_value} has no type."
+                    f"Node {node_id_value} "
+                    "has no type."
                 )
 
             # Skip UI/documentation-only nodes.
-            if class_type in self.UI_ONLY_NODE_TYPES:
+            if (
+                class_type
+                in self.UI_ONLY_NODE_TYPES
+            ):
                 continue
 
-            node_id = str(node_id_value)
-            api_inputs: dict[str, Any] = {}
+            node_id = str(
+                node_id_value
+            )
+
+            api_inputs: dict[
+                str,
+                Any,
+            ] = {}
 
             # ----------------------------------------------------
             # Named widgets
             #
             # Examples:
-            #
-            # text
-            # noise_seed
-            # filename_prefix
-            # image
-            # video
+            #   text
+            #   noise_seed
+            #   filename_prefix
+            #   image
+            #   video
             # ----------------------------------------------------
 
-            named_widgets = node.get("widgets_values_named", {})
+            named_widgets = node.get(
+                "widgets_values_named",
+                {},
+            )
 
-            if isinstance(named_widgets, dict):
-                for name, value in named_widgets.items():
-                    api_inputs[name] = copy.deepcopy(value)
+            if isinstance(
+                named_widgets,
+                dict,
+            ):
+
+                for name, value in (
+                    named_widgets.items()
+                ):
+
+                    normalized_name = (
+                        str(name)
+                        .strip()
+                        .lower()
+                    )
+
+                    if (
+                        normalized_name
+                        in self.UI_ONLY_WIDGET_NAMES
+                    ):
+                        continue
+
+                    api_inputs[
+                        name
+                    ] = copy.deepcopy(
+                        value
+                    )
 
             # ----------------------------------------------------
             # Graph connections
             # ----------------------------------------------------
 
-            node_inputs = node.get("inputs", [])
+            node_inputs = node.get(
+                "inputs",
+                [],
+            )
 
-            if isinstance(node_inputs, list):
+            if isinstance(
+                node_inputs,
+                list,
+            ):
 
-                for input_def in node_inputs:
+                for input_def in (
+                    node_inputs
+                ):
 
-                    if not isinstance(input_def, dict):
+                    if not isinstance(
+                        input_def,
+                        dict,
+                    ):
                         continue
 
-                    input_name = input_def.get("name")
+                    input_name = (
+                        input_def.get(
+                            "name"
+                        )
+                    )
 
                     if not input_name:
                         continue
 
-                    link_id = input_def.get("link")
+                    link_id = (
+                        input_def.get(
+                            "link"
+                        )
+                    )
 
                     if link_id is not None:
 
-                        source = link_lookup.get(link_id)
+                        source = (
+                            link_lookup.get(
+                                link_id
+                            )
+                        )
 
                         if source is None:
                             raise RuntimeError(
-                                f"Node {node_id} input "
-                                f"'{input_name}' references "
-                                f"missing link {link_id}."
+                                f"Node {node_id} "
+                                f"input '{input_name}' "
+                                f"references missing "
+                                f"link {link_id}."
                             )
 
-                        source_node_id = source[0]
-
-                        # A graph connection cannot originate from
-                        # a skipped UI-only node.
-                        if source_node_id not in {
-                            str(n.get("id"))
-                            for n in nodes
-                            if isinstance(n, dict)
-                            and n.get("type")
-                            not in self.UI_ONLY_NODE_TYPES
-                        }:
-                            raise RuntimeError(
-                                f"Node {node_id} input '{input_name}' "
-                                f"references skipped/non-executable "
-                                f"node {source_node_id}."
-                            )
-
-                        api_inputs[input_name] = copy.deepcopy(source)
-
-                    elif "value" in input_def:
-                        api_inputs[input_name] = copy.deepcopy(
-                            input_def["value"]
+                        source_node_id = (
+                            source[0]
                         )
 
-            api_workflow[node_id] = {
+                        # A graph connection cannot
+                        # originate from a skipped
+                        # UI-only node.
+                        if (
+                            source_node_id
+                            not in executable_node_ids
+                        ):
+                            raise RuntimeError(
+                                f"Node {node_id} "
+                                f"input '{input_name}' "
+                                f"references skipped/"
+                                f"non-executable node "
+                                f"{source_node_id}."
+                            )
+
+                        api_inputs[
+                            input_name
+                        ] = copy.deepcopy(
+                            source
+                        )
+
+                    elif (
+                        "value"
+                        in input_def
+                    ):
+
+                        api_inputs[
+                            input_name
+                        ] = copy.deepcopy(
+                            input_def[
+                                "value"
+                            ]
+                        )
+
+            api_workflow[
+                node_id
+            ] = {
                 "class_type": class_type,
                 "inputs": api_inputs,
             }
 
         if not api_workflow:
             raise RuntimeError(
-                f"No executable nodes found in: {self.workflow_path}"
+                "No executable nodes found in: "
+                f"{self.workflow_path}"
             )
 
         return api_workflow
 
     @staticmethod
-    def _is_api_workflow(workflow: Any) -> bool:
+    def _is_api_workflow(
+        workflow: Any,
+    ) -> bool:
         """
-        Return True only when the dictionary already looks like
-        a ComfyUI API prompt.
+        Return True only when the dictionary already
+        looks like a ComfyUI API prompt.
         """
 
-        if not isinstance(workflow, dict) or not workflow:
+        if (
+            not isinstance(
+                workflow,
+                dict,
+            )
+            or not workflow
+        ):
             return False
 
         if "nodes" in workflow:
             return False
 
         return all(
-            isinstance(value, dict)
+            isinstance(
+                value,
+                dict,
+            )
             and "class_type" in value
             and "inputs" in value
             for value in workflow.values()
@@ -240,34 +421,48 @@ class ComfyWorkflowAdapter:
         shot: Any,
     ) -> dict[str, Any]:
         """
-        Apply shot-specific prompt values to a copy of the workflow.
+        Apply shot-specific prompt values to
+        a copy of the API workflow.
         """
 
-        result = copy.deepcopy(workflow)
-
-        positive_prompt = self._get_shot_value(
-            shot,
-            [
-                "prompt",
-                "positive_prompt",
-                "generation_prompt",
-                "description",
-            ],
+        result = copy.deepcopy(
+            workflow
         )
 
-        negative_prompt = self._get_shot_value(
-            shot,
-            [
-                "negative_prompt",
-                "negative",
-            ],
+        positive_prompt = (
+            self._get_shot_value(
+                shot,
+                [
+                    "prompt",
+                    "positive_prompt",
+                    "generation_prompt",
+                    "description",
+                    "visual_prompt",
+                ],
+            )
+        )
+
+        negative_prompt = (
+            self._get_shot_value(
+                shot,
+                [
+                    "negative_prompt",
+                    "negative",
+                ],
+            )
         )
 
         if positive_prompt:
-            self.set_prompt(result, positive_prompt)
+            self.set_prompt(
+                result,
+                positive_prompt,
+            )
 
         if negative_prompt:
-            self.set_negative_prompt(result, negative_prompt)
+            self.set_negative_prompt(
+                result,
+                negative_prompt,
+            )
 
         return result
 
@@ -277,19 +472,43 @@ class ComfyWorkflowAdapter:
         field_names: list[str],
     ) -> str | None:
 
-        if isinstance(shot, dict):
-            for field in field_names:
-                value = shot.get(field)
+        if isinstance(
+            shot,
+            dict,
+        ):
 
-                if isinstance(value, str) and value.strip():
+            for field in field_names:
+
+                value = shot.get(
+                    field
+                )
+
+                if (
+                    isinstance(
+                        value,
+                        str,
+                    )
+                    and value.strip()
+                ):
                     return value.strip()
 
             return None
 
         for field in field_names:
-            value = getattr(shot, field, None)
 
-            if isinstance(value, str) and value.strip():
+            value = getattr(
+                shot,
+                field,
+                None,
+            )
+
+            if (
+                isinstance(
+                    value,
+                    str,
+                )
+                and value.strip()
+            ):
                 return value.strip()
 
         return None
@@ -301,19 +520,39 @@ class ComfyWorkflowAdapter:
     @staticmethod
     def _get_clip_text_nodes(
         workflow: dict[str, Any],
-    ) -> list[tuple[str, dict[str, Any]]]:
+    ) -> list[
+        tuple[
+            str,
+            dict[str, Any],
+        ]
+    ]:
 
         result = []
 
-        for node_id, node in workflow.items():
+        for node_id, node in (
+            workflow.items()
+        ):
 
-            if node.get("class_type") != "CLIPTextEncode":
+            if (
+                node.get(
+                    "class_type"
+                )
+                != "CLIPTextEncode"
+            ):
                 continue
 
-            inputs = node.get("inputs", {})
+            inputs = node.get(
+                "inputs",
+                {},
+            )
 
             if "text" in inputs:
-                result.append((node_id, node))
+                result.append(
+                    (
+                        node_id,
+                        node,
+                    )
+                )
 
         return result
 
@@ -323,27 +562,39 @@ class ComfyWorkflowAdapter:
         prompt: str,
     ) -> None:
 
-        candidates = ComfyWorkflowAdapter._get_clip_text_nodes(
-            workflow
+        candidates = (
+            ComfyWorkflowAdapter
+            ._get_clip_text_nodes(
+                workflow
+            )
         )
 
         if not candidates:
             raise RuntimeError(
-                "No CLIPTextEncode node with a text input was found."
+                "No CLIPTextEncode node "
+                "with a text input was found."
             )
 
         # Prefer an empty prompt node.
         for _, node in candidates:
 
             current = str(
-                node["inputs"].get("text", "")
+                node["inputs"].get(
+                    "text",
+                    "",
+                )
             ).strip()
 
             if not current:
-                node["inputs"]["text"] = prompt
+                node[
+                    "inputs"
+                ][
+                    "text"
+                ] = prompt
                 return
 
-        # Otherwise select the first node that does not look negative.
+        # Otherwise select the first node
+        # that does not look negative.
         negative_markers = (
             "negative",
             "worst quality",
@@ -352,20 +603,39 @@ class ComfyWorkflowAdapter:
             "deformed",
             "distorted",
             "bad anatomy",
+            "watermark",
+            "ugly",
+            "fused fingers",
         )
 
         for _, node in candidates:
 
             current = str(
-                node["inputs"].get("text", "")
+                node["inputs"].get(
+                    "text",
+                    "",
+                )
             ).lower()
 
-            if not any(marker in current for marker in negative_markers):
-                node["inputs"]["text"] = prompt
+            if not any(
+                marker in current
+                for marker in negative_markers
+            ):
+
+                node[
+                    "inputs"
+                ][
+                    "text"
+                ] = prompt
+
                 return
 
         # Final fallback.
-        candidates[0][1]["inputs"]["text"] = prompt
+        candidates[0][1][
+            "inputs"
+        ][
+            "text"
+        ] = prompt
 
     @staticmethod
     def set_negative_prompt(
@@ -373,13 +643,17 @@ class ComfyWorkflowAdapter:
         negative_prompt: str,
     ) -> None:
 
-        candidates = ComfyWorkflowAdapter._get_clip_text_nodes(
-            workflow
+        candidates = (
+            ComfyWorkflowAdapter
+            ._get_clip_text_nodes(
+                workflow
+            )
         )
 
         if not candidates:
             raise RuntimeError(
-                "No CLIPTextEncode node with a text input was found."
+                "No CLIPTextEncode node "
+                "with a text input was found."
             )
 
         negative_markers = (
@@ -390,26 +664,48 @@ class ComfyWorkflowAdapter:
             "deformed",
             "distorted",
             "bad anatomy",
+            "watermark",
+            "ugly",
+            "fused fingers",
         )
 
         for _, node in candidates:
 
             current = str(
-                node["inputs"].get("text", "")
+                node["inputs"].get(
+                    "text",
+                    "",
+                )
             ).lower()
 
-            if any(marker in current for marker in negative_markers):
-                node["inputs"]["text"] = negative_prompt
+            if any(
+                marker in current
+                for marker in negative_markers
+            ):
+
+                node[
+                    "inputs"
+                ][
+                    "text"
+                ] = negative_prompt
+
                 return
 
-        # If there are at least two text nodes, the second is the
-        # safest fallback for the negative conditioning path.
+        # If there are at least two text nodes,
+        # the second is the safest fallback.
         if len(candidates) >= 2:
-            candidates[1][1]["inputs"]["text"] = negative_prompt
+
+            candidates[1][1][
+                "inputs"
+            ][
+                "text"
+            ] = negative_prompt
+
             return
 
         raise RuntimeError(
-            "Could not identify a negative CLIPTextEncode node."
+            "Could not identify a negative "
+            "CLIPTextEncode node."
         )
 
     # ============================================================
@@ -427,17 +723,28 @@ class ComfyWorkflowAdapter:
 
         for node in workflow.values():
 
-            inputs = node.get("inputs", {})
+            inputs = node.get(
+                "inputs",
+                {},
+            )
 
-            for seed_name in ("noise_seed", "seed"):
+            for seed_name in (
+                "noise_seed",
+                "seed",
+            ):
 
                 if seed_name in inputs:
-                    inputs[seed_name] = seed
+
+                    inputs[
+                        seed_name
+                    ] = seed
+
                     updated = True
 
         if not updated:
             raise RuntimeError(
-                "No seed or noise_seed input was found."
+                "No seed or noise_seed input "
+                "was found."
             )
 
     # ============================================================
@@ -454,15 +761,26 @@ class ComfyWorkflowAdapter:
 
         for node in workflow.values():
 
-            inputs = node.get("inputs", {})
+            inputs = node.get(
+                "inputs",
+                {},
+            )
 
-            if "filename_prefix" in inputs:
-                inputs["filename_prefix"] = filename_prefix
+            if (
+                "filename_prefix"
+                in inputs
+            ):
+
+                inputs[
+                    "filename_prefix"
+                ] = filename_prefix
+
                 updated = True
 
         if not updated:
             raise RuntimeError(
-                "No filename_prefix input was found."
+                "No filename_prefix input "
+                "was found."
             )
 
     # ============================================================
@@ -477,9 +795,32 @@ class ComfyWorkflowAdapter:
 
         for node in workflow.values():
 
-            if node.get("class_type") == "LoadImage":
-                node.setdefault("inputs", {})["image"] = filename
+            if (
+                node.get(
+                    "class_type"
+                )
+                != "LoadImage"
+            ):
+                continue
+
+            inputs = node.setdefault(
+                "inputs",
+                {},
+            )
+
+            if "image" in inputs:
+                inputs[
+                    "image"
+                ] = filename
                 return
+
+            # In case the API conversion did not include
+            # the image widget for some reason, create it.
+            inputs[
+                "image"
+            ] = filename
+
+            return
 
         raise RuntimeError(
             "No LoadImage node was found."
@@ -497,9 +838,32 @@ class ComfyWorkflowAdapter:
 
         for node in workflow.values():
 
-            if node.get("class_type") == "VHS_LoadVideo":
-                node.setdefault("inputs", {})["video"] = filename
+            if (
+                node.get(
+                    "class_type"
+                )
+                != "VHS_LoadVideo"
+            ):
+                continue
+
+            inputs = node.setdefault(
+                "inputs",
+                {},
+            )
+
+            if "video" in inputs:
+                inputs[
+                    "video"
+                ] = filename
                 return
+
+            # In case the API conversion did not include
+            # the video widget for some reason, create it.
+            inputs[
+                "video"
+            ] = filename
+
+            return
 
         raise RuntimeError(
             "No VHS_LoadVideo node was found."
