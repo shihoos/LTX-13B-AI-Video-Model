@@ -18,15 +18,15 @@ from schemas.parser import (
 class ScenePlanner:
 
     def __init__(
-    self,
-    model=None,
+        self,
+        model=None,
     ):
 
-    self.model = (
-        model
-        if model is not None
-        else QwenStoryModel()
-    )
+        self.model = (
+            model
+            if model is not None
+            else QwenStoryModel()
+        )
 
     def create_scene_plan(
         self,
@@ -73,16 +73,6 @@ class ScenePlanner:
                     character
                 )
 
-            else:
-
-                character_data.append(
-                    {
-                        "name": str(
-                            character
-                        )
-                    }
-                )
-
         prompt = template.format(
             story=story,
             characters=json.dumps(
@@ -124,37 +114,47 @@ class ScenePlanner:
             scenes.append(
                 Scene(
                     scene_id=item.get(
-                        "scene_id",
-                        f"scene_{len(scenes) + 1:03d}",
+                        "scene_id"
+                    ) or (
+                        f"scene_"
+                        f"{len(scenes) + 1:03d}"
                     ),
+
                     order=item.get(
                         "order",
                         len(scenes) + 1,
                     ),
+
                     location=item.get(
                         "location",
                         "",
                     ),
+
                     time_of_day=item.get(
                         "time_of_day",
                         "",
                     ),
+
                     description=item.get(
                         "description",
                         "",
                     ),
+
                     characters=item.get(
                         "characters",
                         [],
                     ),
+
                     story_summary=item.get(
                         "story_summary",
                         "",
                     ),
+
                     continuity_notes=item.get(
                         "continuity_notes",
                         "",
                     ),
+
                     shot_ids=item.get(
                         "shot_ids",
                         [],
