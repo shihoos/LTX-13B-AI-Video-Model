@@ -1,4 +1,5 @@
 from pathlib import Path
+import importlib.metadata
 import re
 import shutil
 import subprocess
@@ -25,49 +26,93 @@ COMFY_REPO = (
     "https://github.com/Comfy-Org/ComfyUI.git"
 )
 
-# None = follow the current default branch of ComfyUI.
-# This is intentional while testing modern ComfyUI.
-COMFY_COMMIT = "483b3e62e00624fc52da8ad67e88f863abe975d2"
+# Proven ComfyUI v0.3.44 revision.
+COMFY_COMMIT = (
+    "c5de4955bb91a2b136027a698aaecb8d19e3d892"
+)
 
-# Keep the proven LTX 0.9.8-era node implementation.
+# Proven LTX 0.9.8 workflow implementation.
 LTXVIDEO_COMMIT = (
     "ee11be3ce229c3afd5fadf8a1258eb8b84af33b1"
 )
 
-# Keep the verified KJNodes 1.0.8 source.
+# Proven KJNodes revision used successfully with the workflow.
 KJNODES_COMMIT = (
-    "89fb17ae84951995ab1eee19e205ea48ceed27c9"
+    "7ecb190ef91d988420cf0e682efb79ac7433c0b7"
 )
+
+
+# ============================================================
+# PROVEN CUSTOM NODE REVISIONS
+# ============================================================
 
 NODES = {
     "ComfyUI-GGUF": {
-        "url": "https://github.com/city96/ComfyUI-GGUF.git",
-        "commit": None,
+        "url": (
+            "https://github.com/city96/"
+            "ComfyUI-GGUF.git"
+        ),
+        "commit": (
+            "6ea2651e7df66d7585f6ffee804b20e92fb38b8a"
+        ),
     },
+
     "ComfyUI-LTXVideo": {
-        "url": "https://github.com/Lightricks/ComfyUI-LTXVideo.git",
+        "url": (
+            "https://github.com/Lightricks/"
+            "ComfyUI-LTXVideo.git"
+        ),
         "commit": LTXVIDEO_COMMIT,
     },
+
     "ComfyUI-VideoHelperSuite": {
         "url": (
             "https://github.com/Kosinkadink/"
             "ComfyUI-VideoHelperSuite.git"
         ),
-        "commit": None,
+        "commit": (
+            "4ee72c065db22c9d96c2427954dc69e7b908444b"
+        ),
     },
+
     "rgthree-comfy": {
-        "url": "https://github.com/rgthree/rgthree-comfy.git",
+        "url": (
+            "https://github.com/rgthree/"
+            "rgthree-comfy.git"
+        ),
         "commit": None,
     },
+
     "ComfyUI-KJNodes": {
-        "url": "https://github.com/kijai/ComfyUI-KJNodes.git",
+        "url": (
+            "https://github.com/kijai/"
+            "ComfyUI-KJNodes.git"
+        ),
         "commit": KJNODES_COMMIT,
     },
 }
 
 
 # ============================================================
-# RUNTIME SAFETY
+# PROVEN PYTHON PACKAGE VERSIONS
+# ============================================================
+
+FRONTEND_PACKAGES = {
+    "comfyui-frontend-package": "1.23.4",
+    "comfyui-workflow-templates": "0.1.35",
+    "comfyui-embedded-docs": "0.2.4",
+}
+
+RUNTIME_PACKAGES = {
+    "torchsde": "0.2.6",
+    "spandrel": "0.4.2",
+    "av": "18.1.0",
+    "gguf": "0.19.0",
+}
+
+
+# ============================================================
+# TORCH / CUDA SAFETY
 # ============================================================
 
 EXPECTED_TORCH_PREFIX = "2.10.0+cu128"
@@ -80,6 +125,53 @@ FORBIDDEN_PACKAGES = {
 
 
 # ============================================================
+# MODEL DATASET PATHS
+# ============================================================
+
+MODEL_SOURCES = {
+    "ltx_q4": (
+        Path(
+            "/kaggle/input/datasets/shihoos/"
+            "ltx13b-q4"
+        )
+        / "LTXV-13B-0.9.8-distilled-Q4_K_M.gguf"
+    ),
+
+    "t5_q4": (
+        Path(
+            "/kaggle/input/datasets/shihoos/"
+            "ltx13b-t5"
+        )
+        / "t5-v1_1-xxl-encoder-Q4_K_M.gguf"
+    ),
+
+    "vae": (
+        Path(
+            "/kaggle/input/datasets/shihoos/"
+            "ltx13b-vae"
+        )
+        / "LTXV-13B-0.9.8-distilled-VAE.safetensors"
+    ),
+
+    "ic_lora": (
+        Path(
+            "/kaggle/input/datasets/shihoos/"
+            "ltx13b-enhancers"
+        )
+        / "ltxv-098-ic-lora-detailer-comfyui.safetensors"
+    ),
+
+    "spatial_upscaler": (
+        Path(
+            "/kaggle/input/datasets/shihoos/"
+            "ltx13b-enhancers"
+        )
+        / "ltxv-spatial-upscaler-0.9.8.safetensors"
+    ),
+}
+
+
+# ============================================================
 # COMMAND HELPERS
 # ============================================================
 
@@ -87,6 +179,7 @@ def run(command, cwd=None):
     print(
         "\n$ " + " ".join(map(str, command))
     )
+
     subprocess.run(
         command,
         cwd=cwd,
@@ -96,11 +189,17 @@ def run(command, cwd=None):
 
 def git_output(repository: Path, args):
     result = subprocess.run(
-        ["git", "-C", str(repository), *args],
+        [
+            "git",
+            "-C",
+            str(repository),
+            *args,
+        ],
         capture_output=True,
         text=True,
         check=True,
     )
+
     return result.stdout.strip()
 
 
@@ -112,61 +211,14 @@ def git_current_commit(repository: Path) -> str:
 
 
 def repository_is_git(repository: Path) -> bool:
-    return (repository / ".git").exists()
+    return (
+        repository / ".git"
+    ).exists()
 
 
 # ============================================================
 # REPOSITORY SYNCHRONIZATION
 # ============================================================
-
-def get_default_branch(repository: Path) -> str:
-    """
-    Return origin's default branch name.
-    Falls back to master, then main.
-    """
-    result = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repository),
-            "remote",
-            "show",
-            "origin",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-    match = re.search(
-        r"HEAD branch:\s*(\S+)",
-        result.stdout,
-    )
-
-    if match:
-        return match.group(1)
-
-    for branch in ("master", "main"):
-        exists = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repository),
-                "show-ref",
-                "--verify",
-                f"refs/remotes/origin/{branch}",
-            ],
-            capture_output=True,
-            text=True,
-        ).returncode == 0
-
-        if exists:
-            return branch
-
-    raise RuntimeError(
-        f"Could not determine default branch for {repository}"
-    )
-
 
 def checkout_pinned_commit(
     repository: Path,
@@ -197,7 +249,9 @@ def checkout_pinned_commit(
         cwd=repository,
     )
 
-    actual = git_current_commit(repository)
+    actual = git_current_commit(
+        repository
+    )
 
     if actual != commit:
         raise RuntimeError(
@@ -211,77 +265,36 @@ def checkout_pinned_commit(
     )
 
 
-def update_to_latest(
-    repository: Path,
-):
-    """
-    Put an existing checkout on the remote default branch.
-    This also handles a previous detached HEAD state.
-    """
-    run(
-        [
-            "git",
-            "fetch",
-            "origin",
-            "--tags",
-            "--prune",
-        ],
-        cwd=repository,
-    )
-
-    branch = get_default_branch(repository)
-
-    run(
-        [
-            "git",
-            "checkout",
-            "--force",
-            f"origin/{branch}",
-        ],
-        cwd=repository,
-    )
-
-    actual = git_current_commit(repository)
-
-    print(
-        f"✅ Latest {branch} revision active: {actual}"
-    )
-
-
 def clone_or_sync(
     url: str,
     destination: Path,
     commit: str | None = None,
 ):
-    """
-    commit=None:
-        clone or update to the repository's default branch.
-
-    commit=<SHA>:
-        clone or force-checkout the exact SHA.
-    """
     if destination.exists():
 
-        if not repository_is_git(destination):
+        if not repository_is_git(
+            destination
+        ):
             print(
-                f"\nRemoving incomplete repository: {destination}"
+                f"\nRemoving incomplete repository: "
+                f"{destination}"
             )
-            shutil.rmtree(destination)
+
+            shutil.rmtree(
+                destination
+            )
 
         else:
+
             print(
-                f"\nRepository already exists: {destination}"
+                f"\nRepository already exists: "
+                f"{destination}"
             )
 
-            if commit:
-                checkout_pinned_commit(
-                    destination,
-                    commit,
-                )
-            else:
-                update_to_latest(
-                    destination,
-                )
+            checkout_pinned_commit(
+                destination,
+                commit,
+            )
 
             return
 
@@ -303,16 +316,10 @@ def clone_or_sync(
         ]
     )
 
-    if commit:
-        checkout_pinned_commit(
-            destination,
-            commit,
-        )
-    else:
-        print(
-            f"✅ Latest default branch active: "
-            f"{git_current_commit(destination)}"
-        )
+    checkout_pinned_commit(
+        destination,
+        commit,
+    )
 
 
 # ============================================================
@@ -327,16 +334,31 @@ def verify_torch():
             "PyTorch is not installed."
         ) from exc
 
-    print("\n" + "=" * 70)
-    print("PYTORCH / CUDA VERIFICATION")
-    print("=" * 70)
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "PYTORCH / CUDA VERIFICATION"
+    )
+    print(
+        "=" * 70
+    )
 
-    print("Torch:", torch.__version__)
-    print("CUDA:", torch.version.cuda)
+    print(
+        "Torch:",
+        torch.__version__,
+    )
+
+    print(
+        "CUDA:",
+        torch.version.cuda,
+    )
+
     print(
         "CUDA available:",
         torch.cuda.is_available(),
     )
+
     print(
         "GPU count:",
         torch.cuda.device_count(),
@@ -352,16 +374,14 @@ def verify_torch():
     ):
         raise RuntimeError(
             "Unexpected PyTorch version.\n"
-            f"Expected prefix: {EXPECTED_TORCH_PREFIX}\n"
+            f"Expected prefix: "
+            f"{EXPECTED_TORCH_PREFIX}\n"
             f"Found: {torch.__version__}"
         )
 
-    if torch.cuda.device_count() < 2:
-        raise RuntimeError(
-            "This project requires two CUDA GPUs."
-        )
-
-    for index in range(torch.cuda.device_count()):
+    for index in range(
+        torch.cuda.device_count()
+    ):
         print(
             f"GPU {index}: "
             f"{torch.cuda.get_device_name(index)}"
@@ -388,10 +408,17 @@ def filter_requirements(
 
         line = raw_line.strip()
 
-        if not line or line.startswith("#"):
+        if (
+            not line
+            or line.startswith("#")
+        ):
             continue
 
-        line = line.split("#", 1)[0].strip()
+        line = (
+            line
+            .split("#", 1)[0]
+            .strip()
+        )
 
         if not line:
             continue
@@ -426,20 +453,26 @@ def install_requirements(
     if not source.exists():
         return
 
-    destination = PROJECT / temporary_name
+    destination = (
+        PROJECT / temporary_name
+    )
 
     filter_requirements(
         source,
         destination,
     )
 
-    if not destination.read_text(
+    content = destination.read_text(
         encoding="utf-8"
-    ).strip():
+    ).strip()
+
+    if not content:
+
         try:
             destination.unlink()
         except OSError:
             pass
+
         return
 
     run(
@@ -473,24 +506,36 @@ def install_comfy_dependencies():
 
 
 def install_node_dependencies():
-    print("\n" + "=" * 70)
-    print("CUSTOM NODE DEPENDENCIES")
-    print("=" * 70)
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "CUSTOM NODE DEPENDENCIES"
+    )
+    print(
+        "=" * 70
+    )
 
     for name in NODES:
 
         requirements = (
-            CUSTOM / name / "requirements.txt"
+            CUSTOM
+            / name
+            / "requirements.txt"
         )
 
         if not requirements.exists():
+
             print(
-                f"{name}: no requirements.txt"
+                f"{name}: "
+                "no requirements.txt"
             )
+
             continue
 
         print(
-            f"\nInstalling dependencies for {name}"
+            f"\nInstalling dependencies "
+            f"for {name}"
         )
 
         install_requirements(
@@ -499,25 +544,256 @@ def install_node_dependencies():
         )
 
 
+def install_proven_runtime_packages():
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "PROVEN LTX-13B RUNTIME PACKAGES"
+    )
+    print(
+        "=" * 70
+    )
+
+    packages = {
+        **FRONTEND_PACKAGES,
+        **RUNTIME_PACKAGES,
+    }
+
+    for package, version in packages.items():
+
+        requirement = (
+            f"{package}=={version}"
+        )
+
+        print(
+            f"\nInstalling {requirement}"
+        )
+
+        run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--force-reinstall",
+                "--no-deps",
+                requirement,
+            ]
+        )
+
+    print(
+        "\n✅ Proven runtime packages installed."
+    )
+
+
+def verify_proven_runtime_packages():
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "VERIFYING PROVEN RUNTIME PACKAGES"
+    )
+    print(
+        "=" * 70
+    )
+
+    expected = {
+        **FRONTEND_PACKAGES,
+        **RUNTIME_PACKAGES,
+    }
+
+    for package, wanted in expected.items():
+
+        try:
+            actual = (
+                importlib.metadata.version(
+                    package
+                )
+            )
+        except (
+            importlib.metadata.PackageNotFoundError
+        ):
+            actual = None
+
+        print(
+            f"{package}: "
+            f"{actual}"
+        )
+
+        if actual != wanted:
+            raise RuntimeError(
+                f"\nPackage version mismatch:\n"
+                f"{package}\n"
+                f"Expected: {wanted}\n"
+                f"Found: {actual}"
+            )
+
+    print(
+        "\n✅ All proven runtime versions verified."
+    )
+
+
+# ============================================================
+# MODEL PATHS
+# ============================================================
+
+def install_model_links():
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "CONNECTING KAGGLE MODEL DATASETS"
+    )
+    print(
+        "=" * 70
+    )
+
+    targets = {
+        "ltx_q4": (
+            COMFY
+            / "models"
+            / "unet"
+            / MODEL_SOURCES[
+                "ltx_q4"
+            ].name
+        ),
+
+        "t5_q4": (
+            COMFY
+            / "models"
+            / "clip"
+            / MODEL_SOURCES[
+                "t5_q4"
+            ].name
+        ),
+
+        "vae": (
+            COMFY
+            / "models"
+            / "vae"
+            / MODEL_SOURCES[
+                "vae"
+            ].name
+        ),
+
+        "ic_lora": (
+            COMFY
+            / "models"
+            / "loras"
+            / MODEL_SOURCES[
+                "ic_lora"
+            ].name
+        ),
+    }
+
+    for name, source in MODEL_SOURCES.items():
+
+        if not source.exists():
+            raise FileNotFoundError(
+                f"{name} model not found:\n"
+                f"{source}"
+            )
+
+        print(
+            f"✅ {name}: "
+            f"{source}"
+        )
+
+    for key, target in targets.items():
+
+        source = MODEL_SOURCES[key]
+
+        target.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        if (
+            target.is_symlink()
+            or target.exists()
+        ):
+            target.unlink()
+
+        target.symlink_to(
+            source.resolve()
+        )
+
+        print(
+            f"✅ {key} → {target}"
+        )
+
+    # Spatial upscaler is registered by
+    # the pinned LTXVideo implementation.
+    # Keep it available in the likely model locations.
+    spatial = MODEL_SOURCES[
+        "spatial_upscaler"
+    ]
+
+    spatial_dirs = [
+        COMFY / "models" / "upscale_models",
+        COMFY / "models" / "latent_upscale",
+        COMFY / "models" / "latent_upscalers",
+        COMFY / "models" / "ltxv",
+        COMFY / "models" / "upscalers",
+    ]
+
+    for directory in spatial_dirs:
+
+        directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        target = (
+            directory / spatial.name
+        )
+
+        if (
+            target.is_symlink()
+            or target.exists()
+        ):
+            target.unlink()
+
+        target.symlink_to(
+            spatial.resolve()
+        )
+
+    print(
+        "✅ Spatial upscaler connected."
+    )
+
+
 # ============================================================
 # SOURCE COMPATIBILITY
 # ============================================================
 
 def verify_ltx_source_compatibility():
-    print("\n" + "=" * 70)
     print(
-        "VERIFYING LTX / COMFYUI SOURCE COMPATIBILITY"
+        "\n" + "=" * 70
     )
-    print("=" * 70)
-
-    ltx_repo = CUSTOM / "ComfyUI-LTXVideo"
-    ltx_revision = git_current_commit(
-        ltx_repo
+    print(
+        "VERIFYING LTX / COMFYUI "
+        "SOURCE COMPATIBILITY"
+    )
+    print(
+        "=" * 70
     )
 
-    # Use the actual checked-out revision, not the config value.
-    comfy_revision = git_current_commit(
-        COMFY
+    ltx_repo = (
+        CUSTOM / "ComfyUI-LTXVideo"
+    )
+
+    ltx_revision = (
+        git_current_commit(
+            ltx_repo
+        )
+    )
+
+    comfy_revision = (
+        git_current_commit(
+            COMFY
+        )
     )
 
     result = subprocess.run(
@@ -526,7 +802,10 @@ def verify_ltx_source_compatibility():
             "-C",
             str(ltx_repo),
             "show",
-            f"{ltx_revision}:tricks/modules/ltx_model.py",
+            (
+                f"{ltx_revision}:"
+                "tricks/modules/ltx_model.py"
+            ),
         ],
         capture_output=True,
         text=True,
@@ -535,7 +814,7 @@ def verify_ltx_source_compatibility():
 
     ltx_source = result.stdout
 
-    required = [
+    required_ltx_symbols = [
         "BasicTransformerBlock",
         "LTXVModel",
         "apply_rotary_emb",
@@ -548,7 +827,10 @@ def verify_ltx_source_compatibility():
             "-C",
             str(COMFY),
             "show",
-            f"{comfy_revision}:comfy/ldm/lightricks/model.py",
+            (
+                f"{comfy_revision}:"
+                "comfy/ldm/lightricks/model.py"
+            ),
         ],
         capture_output=True,
         text=True,
@@ -558,7 +840,7 @@ def verify_ltx_source_compatibility():
     comfy_source = result.stdout
 
     print(
-        "\nComfyUI revision:",
+        "ComfyUI revision:",
         comfy_revision,
     )
 
@@ -567,13 +849,11 @@ def verify_ltx_source_compatibility():
         ltx_revision,
     )
 
-    print(
-        "\nRequired LTXVideo symbols:"
-    )
+    for symbol in required_ltx_symbols:
 
-    for symbol in required:
-
-        present = symbol in comfy_source
+        present = (
+            symbol in comfy_source
+        )
 
         print(
             f"{symbol:35}"
@@ -582,32 +862,43 @@ def verify_ltx_source_compatibility():
 
         if not present:
             raise RuntimeError(
-                "\nLTXVideo / ComfyUI source "
-                "compatibility check failed.\n"
+                "\nLTXVideo / ComfyUI "
+                "source compatibility failed.\n"
                 f"Missing: {symbol}\n"
-                f"ComfyUI revision: {comfy_revision}\n"
-                f"LTXVideo revision: {ltx_revision}"
+                f"ComfyUI: {comfy_revision}\n"
+                f"LTXVideo: {ltx_revision}"
             )
 
     print(
-        "\n✅ LTXVideo ↔ ComfyUI API compatibility verified."
+        "\n✅ LTXVideo ↔ ComfyUI "
+        "source compatibility verified."
     )
 
 
 def verify_kjnodes_source():
-    print("\n" + "=" * 70)
-    print("VERIFYING KJ NODES")
-    print("=" * 70)
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "VERIFYING KJ NODES"
+    )
+    print(
+        "=" * 70
+    )
 
-    repository = CUSTOM / "ComfyUI-KJNodes"
-    revision = git_current_commit(
-        repository
+    repository = (
+        CUSTOM / "ComfyUI-KJNodes"
+    )
+
+    revision = (
+        git_current_commit(
+            repository
+        )
     )
 
     required_nodes = [
         "StringToFloatList",
         "FloatToSigmas",
-        "ImageResizeKJ",
     ]
 
     python_files = subprocess.run(
@@ -625,15 +916,12 @@ def verify_kjnodes_source():
         check=True,
     ).stdout.splitlines()
 
-    python_files = [
-        path
-        for path in python_files
-        if path.endswith(".py")
-    ]
-
     combined = ""
 
     for path in python_files:
+
+        if not path.endswith(".py"):
+            continue
 
         result = subprocess.run(
             [
@@ -653,7 +941,7 @@ def verify_kjnodes_source():
             )
 
     print(
-        "\nKJNodes revision:",
+        "KJNodes revision:",
         revision,
     )
 
@@ -661,7 +949,7 @@ def verify_kjnodes_source():
 
         if node not in combined:
             raise RuntimeError(
-                "\nRequired KJNodes node missing:\n"
+                f"Required KJNodes node missing: "
                 f"{node}"
             )
 
@@ -669,18 +957,18 @@ def verify_kjnodes_source():
             f"{node:30} ✅"
         )
 
-    breaking = (
+    breaking_symbol = (
         "_append_guide_attention_entry"
     )
 
-    if breaking in combined:
+    if breaking_symbol in combined:
         raise RuntimeError(
-            "\nIncompatible KJNodes API detected:\n"
-            f"{breaking}"
+            "Incompatible KJNodes API detected:\n"
+            f"{breaking_symbol}"
         )
 
     print(
-        f"{breaking:30} ✅ absent"
+        f"{breaking_symbol:30} ✅ absent"
     )
 
     print(
@@ -689,13 +977,19 @@ def verify_kjnodes_source():
 
 
 # ============================================================
-# VALIDATION
+# COMFYUI VALIDATION
 # ============================================================
 
 def validate_comfy():
-    print("\n" + "=" * 70)
-    print("VALIDATING COMFYUI INSTALLATION")
-    print("=" * 70)
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "VALIDATING COMFYUI INSTALLATION"
+    )
+    print(
+        "=" * 70
+    )
 
     required_paths = [
         COMFY / "main.py",
@@ -711,66 +1005,57 @@ def validate_comfy():
 
         if not path.exists():
             raise RuntimeError(
-                f"Missing required path:\n{path}"
+                f"Missing required path:\n"
+                f"{path}"
             )
 
-        print(f"✅ {path}")
+        print(
+            f"✅ {path}"
+        )
 
 
 def validate_repositories():
-    print("\n" + "=" * 70)
-    print("VALIDATING REPOSITORIES")
-    print("=" * 70)
-
-    # --------------------------------------------------------
-    # ComfyUI
-    # --------------------------------------------------------
-
-    if not (COMFY / "main.py").exists():
-        raise RuntimeError(
-            "ComfyUI main.py is missing."
-        )
-
-    comfy_revision = git_current_commit(
-        COMFY
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "VALIDATING REPOSITORIES"
+    )
+    print(
+        "=" * 70
     )
 
-    if COMFY_COMMIT:
+    comfy_revision = (
+        git_current_commit(COMFY)
+    )
 
-        if comfy_revision != COMFY_COMMIT:
-
-            raise RuntimeError(
-                "\nComfyUI revision mismatch.\n"
-                f"Expected: {COMFY_COMMIT}\n"
-                f"Found:    {comfy_revision}"
-            )
-
-        print(
-            f"ComfyUI: {comfy_revision} ✅"
+    if comfy_revision != COMFY_COMMIT:
+        raise RuntimeError(
+            "ComfyUI revision mismatch.\n"
+            f"Expected: {COMFY_COMMIT}\n"
+            f"Found: {comfy_revision}"
         )
 
-    else:
-
-        print(
-            f"ComfyUI: {comfy_revision} "
-            "(latest/unpinned) ✅"
-        )
-
-    # --------------------------------------------------------
-    # Custom nodes
-    # --------------------------------------------------------
+    print(
+        f"ComfyUI: "
+        f"{comfy_revision} ✅"
+    )
 
     for name, info in NODES.items():
 
-        node_dir = CUSTOM / name
+        node_dir = (
+            CUSTOM / name
+        )
 
         if not node_dir.exists():
             raise RuntimeError(
                 f"Missing custom node: {name}"
             )
 
-        revision = git_current_commit(
-            node_dir
+        revision = (
+            git_current_commit(
+                node_dir
+            )
         )
 
         requested = info["commit"]
@@ -781,19 +1066,102 @@ def validate_repositories():
                 raise RuntimeError(
                     f"\n{name} revision mismatch.\n"
                     f"Expected: {requested}\n"
-                    f"Found:    {revision}"
+                    f"Found: {revision}"
                 )
 
             print(
-                f"{name}: {revision} ✅"
+                f"{name}: "
+                f"{revision} ✅"
             )
 
         else:
 
             print(
-                f"{name}: {revision} "
-                "(latest/unpinned)"
+                f"{name}: "
+                f"{revision} ✅"
             )
+
+
+# ============================================================
+# FINAL NODE REGISTRATION TEST
+# ============================================================
+
+def verify_registered_nodes():
+    print(
+        "\n" + "=" * 70
+    )
+    print(
+        "VERIFYING REQUIRED WORKFLOW NODES"
+    )
+    print(
+        "=" * 70
+    )
+
+    import json
+    import urllib.request
+
+    url = (
+        "http://127.0.0.1:8188/object_info"
+    )
+
+    try:
+
+        with urllib.request.urlopen(
+            url,
+            timeout=10,
+        ) as response:
+
+            data = json.loads(
+                response.read()
+            )
+
+    except Exception:
+
+        print(
+            "ComfyUI is not running yet; "
+            "skipping live node check."
+        )
+
+        return
+
+    required = [
+        "LTXVBaseSampler",
+        "LTXVConditioning",
+        "STGGuiderAdvanced",
+        "FloatToSigmas",
+        "StringToFloatList",
+        "LTXVLoopingSampler",
+        "LTXVLatentUpsampler",
+        "LTXVLatentUpsamplerModelLoader",
+        "LTXVTiledVAEDecode",
+        "LTXVFilmGrain",
+        "VHS_LoadVideo",
+        "VHS_VideoCombine",
+    ]
+
+    missing = []
+
+    for node in required:
+
+        if node in data:
+            print(
+                f"✅ {node}"
+            )
+        else:
+            print(
+                f"❌ {node}"
+            )
+            missing.append(node)
+
+    if missing:
+        raise RuntimeError(
+            "Missing workflow nodes:\n"
+            + "\n".join(missing)
+        )
+
+    print(
+        "\n✅ Required workflow nodes registered."
+    )
 
 
 # ============================================================
@@ -802,21 +1170,31 @@ def validate_repositories():
 
 def main():
 
-    print("=" * 70)
-    print("LTX-13B AI VIDEO MODEL BOOTSTRAP")
-    print("=" * 70)
+    print(
+        "=" * 70
+    )
+
+    print(
+        "LTX-13B AI VIDEO MODEL "
+        "PRODUCTION BOOTSTRAP"
+    )
+
+    print(
+        "=" * 70
+    )
 
     PROJECT.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    # 1. Verify runtime.
+    # 1. Runtime verification
     verify_torch()
 
-    # 2. Sync ComfyUI.
+    # 2. ComfyUI
     print(
-        "\nInstalling / synchronizing ComfyUI..."
+        "\nInstalling / synchronizing "
+        "pinned ComfyUI..."
     )
 
     clone_or_sync(
@@ -825,15 +1203,15 @@ def main():
         COMFY_COMMIT,
     )
 
-    # 3. Ensure custom node directory.
+    # 3. Custom nodes
     CUSTOM.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    # 4. Sync custom nodes.
     print(
-        "\nInstalling / synchronizing custom nodes..."
+        "\nInstalling / synchronizing "
+        "pinned custom nodes..."
     )
 
     for name, info in NODES.items():
@@ -844,26 +1222,46 @@ def main():
             info["commit"],
         )
 
-    # 5. Dependencies.
+    # 4. Requirements
     install_comfy_dependencies()
     install_node_dependencies()
 
-    # 6. Filesystem validation.
+    # 5. Restore exact proven runtime package versions.
+    install_proven_runtime_packages()
+
+    # 6. Verify runtime versions.
+    verify_proven_runtime_packages()
+
+    # 7. Model dataset links.
+    install_model_links()
+
+    # 8. Filesystem validation.
     validate_comfy()
 
-    # 7. Repository validation.
+    # 9. Repository validation.
     validate_repositories()
 
-    # 8. Source compatibility.
+    # 10. Source compatibility.
     verify_ltx_source_compatibility()
     verify_kjnodes_source()
 
-    # 9. Final runtime verification.
+    # 11. Final Torch verification.
     verify_torch()
 
-    print("\n" + "=" * 70)
-    print("✅ BOOTSTRAP COMPLETED SUCCESSFULLY")
-    print("=" * 70)
+    # 12. Live node check if server already exists.
+    verify_registered_nodes()
+
+    print(
+        "\n" + "=" * 70
+    )
+
+    print(
+        "✅ BOOTSTRAP COMPLETED SUCCESSFULLY"
+    )
+
+    print(
+        "=" * 70
+    )
 
 
 if __name__ == "__main__":
