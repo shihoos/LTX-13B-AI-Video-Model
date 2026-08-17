@@ -1,0 +1,15 @@
+# Exact runtime packages proven during the Kaggle GPU test.
+
+comfyui-frontend-package==1.23.4
+comfyui-workflow-templates==0.1.35
+comfyui-embedded-docs==0.2.4
+
+torchsde==0.2.6
+spandrel==0.4.2
+av==18.1.0
+gguf==0.19.0
+
+# Torch is intentionally not pip-pinned here.
+# Tested Kaggle runtime:
+# torch==2.10.0+cu128
+# torchvision==0.25.0+cu128
