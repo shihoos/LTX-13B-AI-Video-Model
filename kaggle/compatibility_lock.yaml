@@ -1,0 +1,83 @@
+# LTX-13B production compatibility lock
+# Proven by live Kaggle GPU execution on 2026-08-17.
+# Do not change these versions without an isolated compatibility test.
+
+comfyui:
+  repository: https://github.com/Comfy-Org/ComfyUI.git
+  tag: v0.3.44
+  commit: c5de4955bb91a2b136027a698aaecb8d19e3d892
+
+  frontend:
+    package: comfyui-frontend-package
+    version: 1.23.4
+
+  workflow_templates:
+    package: comfyui-workflow-templates
+    version: 0.1.35
+
+  embedded_docs:
+    package: comfyui-embedded-docs
+    version: 0.2.4
+
+python_runtime:
+  torch: 2.10.0+cu128
+  torchvision: 0.25.0+cu128
+  torchsde: 0.2.6
+  spandrel: 0.4.2
+  av: 18.1.0
+  gguf: 0.19.0
+
+custom_nodes:
+  ComfyUI-LTXVideo:
+    repository: https://github.com/Lightricks/ComfyUI-LTXVideo.git
+    commit: ee11be3ce229c3afd5fadf8a1258eb8b84af33b1
+
+  ComfyUI-KJNodes:
+    repository: https://github.com/kijai/ComfyUI-KJNodes.git
+    commit: 7ecb190ef91d988420cf0e682efb79ac7433c0b7
+
+  ComfyUI-VideoHelperSuite:
+    repository: https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git
+    commit: 4ee72c065db22c9d96c2427954dc69e7b908444b
+
+  ComfyUI-GGUF:
+    repository: https://github.com/city96/ComfyUI-GGUF.git
+    commit: 6ea2651e7df66d7585f6ffee804b20e92fb38b8a
+
+models:
+  ltx_q4:
+    dataset: /kaggle/input/datasets/shihoos/ltx13b-q4
+    filename: LTXV-13B-0.9.8-distilled-Q4_K_M.gguf
+    target: models/unet/LTXV-13B-0.9.8-distilled-Q4_K_M.gguf
+
+  t5_q4:
+    dataset: /kaggle/input/datasets/shihoos/ltx13b-t5
+    filename: t5-v1_1-xxl-encoder-Q4_K_M.gguf
+    target: models/clip/t5-v1_1-xxl-encoder-Q4_K_M.gguf
+
+  vae:
+    dataset: /kaggle/input/datasets/shihoos/ltx13b-vae
+    filename: LTXV-13B-0.9.8-distilled-VAE.safetensors
+    target: models/vae/LTXV-13B-0.9.8-distilled-VAE.safetensors
+
+  ic_lora:
+    dataset: /kaggle/input/datasets/shihoos/ltx13b-enhancers
+    filename: ltxv-098-ic-lora-detailer-comfyui.safetensors
+    target: models/loras/ltxv-098-ic-lora-detailer-comfyui.safetensors
+
+  spatial_upscaler:
+    dataset: /kaggle/input/datasets/shihoos/ltx13b-enhancers
+    filename: ltxv-spatial-upscaler-0.9.8.safetensors
+
+validation:
+  base:
+    frames: 97
+    fps: 24
+    duration_seconds: 4.041667
+    output_resolution: 768x416
+
+  detailer:
+    frames: 97
+    fps: 24
+    duration_seconds: 4.041667
+    output_resolution: 1536x832
