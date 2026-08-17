@@ -17,9 +17,16 @@ from schemas.parser import (
 
 class ShotPlanner:
 
-    def __init__(self):
+    def __init__(
+        self,
+        model=None,
+    ):
 
-        self.model = QwenStoryModel()
+        self.model = (
+            model
+            if model is not None
+            else QwenStoryModel()
+        )
 
     def create_shot_plan(
         self,
@@ -82,14 +89,17 @@ class ShotPlanner:
 
         prompt = template.format(
             story=story,
+
             characters=json.dumps(
                 character_data,
                 indent=2,
             ),
+
             scene=json.dumps(
                 scene_data,
                 indent=2,
             ),
+
             continuity_context=continuity_context,
         )
 
