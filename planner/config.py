@@ -1,5 +1,3 @@
-import os
-
 from pathlib import Path
 
 
@@ -12,37 +10,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 QWEN_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
 
-# Optional exact path.
-#
-# In Kaggle, you can set this to the directory containing:
-#
-# config.json
-# tokenizer.json
-# tokenizer_config.json
-# model weights / safetensors files
-#
-# Example:
-#
-# /kaggle/input/qwen3-4b-instruct-2507
-#
-# If not provided, qwen_loader.py will automatically search
-# inside /kaggle/input for a valid Qwen model directory.
-
-QWEN_LOCAL_PATH_ENV = (
-    os.environ.get(
-        "QWEN_LOCAL_PATH",
-        "",
-    ).strip()
+# Permanent Kaggle dataset mount.
+QWEN_KAGGLE_PATH = (
+    Path("/kaggle/input")
+    / "qwen3-4b-instruct-2507"
 )
 
+# Optional local development path.
 QWEN_LOCAL_PATH = (
-    Path(QWEN_LOCAL_PATH_ENV)
-    if QWEN_LOCAL_PATH_ENV
-    else None
-)
-
-KAGGLE_INPUT_DIR = Path(
-    "/kaggle/input"
+    PROJECT_ROOT
+    / "models"
+    / "qwen3-4b"
 )
 
 QWEN_MAX_NEW_TOKENS = 4096
@@ -100,25 +78,11 @@ DATA_DIR = (
     / "data"
 )
 
-STORIES_DIR = (
-    DATA_DIR
-    / "stories"
-)
-
-CHARACTERS_DIR = (
-    DATA_DIR
-    / "characters"
-)
-
-SCENES_DIR = (
-    DATA_DIR
-    / "scenes"
-)
-
-SHOTS_DIR = (
-    DATA_DIR
-    / "shots"
-)
+STORIES_DIR = DATA_DIR / "stories"
+CHARACTERS_DIR = DATA_DIR / "characters"
+SCENES_DIR = DATA_DIR / "scenes"
+SHOTS_DIR = DATA_DIR / "shots"
+PRODUCTION_DIR = DATA_DIR / "production"
 
 
 # ============================================================
@@ -135,6 +99,7 @@ EXPAND_USER_STORY_MODE = (
     "expand_user_story"
 )
 
+
 VALID_STORY_MODES = {
     AI_STORY_MODE,
     PRESERVE_USER_STORY_MODE,
@@ -149,6 +114,7 @@ def ensure_directories():
         CHARACTERS_DIR,
         SCENES_DIR,
         SHOTS_DIR,
+        PRODUCTION_DIR,
     ]
 
     for directory in directories:
