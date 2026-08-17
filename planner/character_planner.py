@@ -22,19 +22,19 @@ from schemas.parser import (
 class CharacterPlanner:
 
     def __init__(
-    self,
-    model=None,
+        self,
+        model=None,
     ):
 
-    self.model = (
-        model
-        if model is not None
-        else QwenStoryModel()
-    )
+        self.model = (
+            model
+            if model is not None
+            else QwenStoryModel()
+        )
 
-    self.references = (
-        ReferenceManager()
-    )
+        self.references = (
+            ReferenceManager()
+        )
 
     def create_character_plan(
         self,
@@ -112,53 +112,68 @@ class CharacterPlanner:
             )
 
             reference = reference_data.get(
-                name,
+                name
             )
 
             if reference is None:
 
-                reference = self.references.get_character_source(
-                    name
+                reference = (
+                    self.references
+                    .get_character_source(
+                        name
+                    )
                 )
 
             characters.append(
                 Character(
                     character_id=item.get(
-                        "character_id",
-                        f"character_{len(characters) + 1:03d}",
+                        "character_id"
+                    ) or (
+                        f"character_"
+                        f"{len(characters) + 1:03d}"
                     ),
+
                     name=name,
+
                     role=item.get(
                         "role",
                         "",
                     ),
+
                     description=item.get(
                         "description",
                         "",
                     ),
+
                     personality=item.get(
                         "personality",
                         "",
                     ),
+
                     appearance=item.get(
                         "appearance",
                         {},
                     ),
+
                     clothing=item.get(
                         "clothing",
                         {},
                     ),
+
                     distinctive_features=item.get(
                         "distinctive_features",
                         [],
                     ),
+
                     reference_mode=reference.get(
                         "mode",
                         "auto",
                     ),
+
                     reference_path=reference.get(
-                        "path",
+                        "path"
                     ),
+
                     continuity_rules=item.get(
                         "continuity_rules",
                         [],
