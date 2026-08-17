@@ -28,11 +28,7 @@ class ScenePlanner:
             else QwenStoryModel()
         )
 
-    def create_scene_plan(
-        self,
-        story: str,
-        characters: list,
-    ) -> list:
+    def _read_prompt(self) -> str:
 
         project_root = (
             Path(__file__)
@@ -47,8 +43,35 @@ class ScenePlanner:
             / "scene_plan.txt"
         )
 
-        template = prompt_path.read_text(
+        return prompt_path.read_text(
             encoding="utf-8"
+        )
+
+    def _replace(
+        self,
+        template: str,
+        **values,
+    ) -> str:
+
+        prompt = template
+
+        for key, value in values.items():
+
+            prompt = prompt.replace(
+                "{" + key + "}",
+                str(value),
+            )
+
+        return prompt
+
+    def create_scene_plan(
+        self,
+        story: str,
+        characters: list,
+    ) -> list:
+
+        template = (
+            self._read_prompt()
         )
 
         character_data = []
@@ -73,11 +96,13 @@ class ScenePlanner:
                     character
                 )
 
-        prompt = template.format(
+        prompt = self._replace(
+            template,
             story=story,
             characters=json.dumps(
                 character_data,
                 indent=2,
+                ensure_ascii=False,
             ),
         )
 
@@ -113,16 +138,13 @@ class ScenePlanner:
 
             scenes.append(
                 Scene(
-                    scene_id=item.get(
-                        "scene_id"
-                    ) or (
+                    scene_id=(
                         f"scene_"
                         f"{len(scenes) + 1:03d}"
                     ),
 
-                    order=item.get(
-                        "order",
-                        len(scenes) + 1,
+                    order=(
+                        len(scenes) + 1
                     ),
 
                     location=item.get(
@@ -155,10 +177,7 @@ class ScenePlanner:
                         "",
                     ),
 
-                    shot_ids=item.get(
-                        "shot_ids",
-                        [],
-                    ),
+                    shot_ids=[],
                 )
             )
 
