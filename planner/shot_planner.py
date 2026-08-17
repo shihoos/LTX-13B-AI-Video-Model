@@ -28,14 +28,7 @@ class ShotPlanner:
             else QwenStoryModel()
         )
 
-    def create_shot_plan(
-        self,
-        story: str,
-        characters: list,
-        scene,
-        continuity_context: str = "",
-        shot_start_index: int = 1,
-    ) -> list:
+    def _read_prompt(self) -> str:
 
         project_root = (
             Path(__file__)
@@ -50,8 +43,122 @@ class ShotPlanner:
             / "shot_plan.txt"
         )
 
-        template = prompt_path.read_text(
+        return prompt_path.read_text(
             encoding="utf-8"
+        )
+
+    def _replace(
+        self,
+        template: str,
+        **values,
+    ) -> str:
+
+        prompt = template
+
+        for key, value in values.items():
+
+            prompt = prompt.replace(
+                "{" + key + "}",
+                str(value),
+            )
+
+        return prompt
+
+    def _character_reference_map(
+        self,
+        characters: list,
+    ) -> dict:
+
+        references = {}
+
+        for character in characters:
+
+            if hasattr(
+                character,
+                "name",
+            ):
+
+                name = character.name
+
+                reference_path = (
+                    character.reference_path
+                )
+
+            elif isinstance(
+                character,
+                dict,
+            ):
+
+                name = character.get(
+                    "name",
+                    "",
+                )
+
+                reference_path = (
+                    character.get(
+                        "reference_path"
+                    )
+                )
+
+            else:
+
+                continue
+
+            if (
+                name
+                and reference_path
+            ):
+
+                references[
+                    name.lower()
+                ] = str(
+                    reference_path
+                )
+
+        return references
+
+    def _reference_images_for_shot(
+        self,
+        shot_characters: list,
+        reference_map: dict,
+    ) -> list:
+
+        images = []
+
+        for name in shot_characters:
+
+            if not isinstance(
+                name,
+                str,
+            ):
+                continue
+
+            path = reference_map.get(
+                name.lower()
+            )
+
+            if (
+                path
+                and path not in images
+            ):
+
+                images.append(
+                    path
+                )
+
+        return images
+
+    def create_shot_plan(
+        self,
+        story: str,
+        characters: list,
+        scene,
+        continuity_context: str = "",
+        shot_start_index: int = 1,
+    ) -> list:
+
+        template = (
+            self._read_prompt()
         )
 
         character_data = []
@@ -81,26 +188,33 @@ class ShotPlanner:
             "to_dict",
         ):
 
-            scene_data = scene.to_dict()
+            scene_data = (
+                scene.to_dict()
+            )
 
         else:
 
             scene_data = scene
 
-        prompt = template.format(
+        prompt = self._replace(
+            template,
             story=story,
 
             characters=json.dumps(
                 character_data,
                 indent=2,
+                ensure_ascii=False,
             ),
 
             scene=json.dumps(
                 scene_data,
                 indent=2,
+                ensure_ascii=False,
             ),
 
-            continuity_context=continuity_context,
+            continuity_context=(
+                continuity_context
+            ),
         )
 
         messages = [
@@ -126,6 +240,12 @@ class ShotPlanner:
             response
         )
 
+        reference_map = (
+            self._character_reference_map(
+                characters
+            )
+        )
+
         shots = []
 
         for item in data.get(
@@ -133,26 +253,28 @@ class ShotPlanner:
             [],
         ):
 
-            default_shot_id = (
-                f"shot_"
-                f"{shot_start_index + len(shots):03d}"
+            shot_characters = (
+                item.get(
+                    "characters",
+                    [],
+                )
             )
 
             shot = Shot(
-                shot_id=item.get(
-                    "shot_id"
-                ) or default_shot_id,
-
-                scene_id=item.get(
-                    "scene_id"
-                ) or scene_data.get(
-                    "scene_id",
-                    "",
+                shot_id=(
+                    f"shot_"
+                    f"{shot_start_index + len(shots):03d}"
                 ),
 
-                order=item.get(
-                    "order",
-                    len(shots) + 1,
+                scene_id=(
+                    scene_data.get(
+                        "scene_id",
+                        "",
+                    )
+                ),
+
+                order=(
+                    len(shots) + 1
                 ),
 
                 duration_seconds=float(
@@ -162,14 +284,16 @@ class ShotPlanner:
                     )
                 ),
 
-                characters=item.get(
-                    "characters",
-                    [],
+                characters=(
+                    shot_characters
                 ),
 
                 location=item.get(
                     "location",
-                    "",
+                    scene_data.get(
+                        "location",
+                        "",
+                    ),
                 ),
 
                 action=item.get(
@@ -207,13 +331,9 @@ class ShotPlanner:
                     "",
                 ),
 
-                previous_shot=item.get(
-                    "previous_shot"
-                ),
+                previous_shot=None,
 
-                next_shot=item.get(
-                    "next_shot"
-                ),
+                next_shot=None,
 
                 continuity_notes=item.get(
                     "continuity_notes",
@@ -224,9 +344,12 @@ class ShotPlanner:
                     "seed"
                 ),
 
-                reference_images=item.get(
-                    "reference_images",
-                    [],
+                reference_images=(
+                    self
+                    ._reference_images_for_shot(
+                        shot_characters,
+                        reference_map,
+                    )
                 ),
             )
 
