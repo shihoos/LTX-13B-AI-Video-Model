@@ -2,6 +2,14 @@ import json
 
 from datetime import datetime
 
+from planner.config import (
+    DATA_DIR,
+)
+
+from planner.qwen_loader import (
+    QwenStoryModel,
+)
+
 from planner.story_planner import (
     StoryPlanner,
 )
@@ -22,35 +30,35 @@ from pipeline.continuity_manager import (
     ContinuityManager,
 )
 
-from planner.config import (
-    DATA_DIR,
-)
-
 
 class ProductionOrchestrator:
-    """
-    Runs the complete planning pipeline.
-
-    This stage creates a structured production plan
-    without performing video generation.
-    """
 
     def __init__(self):
 
+        self.model = QwenStoryModel()
+
         self.story_planner = (
-            StoryPlanner()
+            StoryPlanner(
+                model=self.model
+            )
         )
 
         self.character_planner = (
-            CharacterPlanner()
+            CharacterPlanner(
+                model=self.model
+            )
         )
 
         self.scene_planner = (
-            ScenePlanner()
+            ScenePlanner(
+                model=self.model
+            )
         )
 
         self.shot_planner = (
-            ShotPlanner()
+            ShotPlanner(
+                model=self.model
+            )
         )
 
         self.continuity_manager = (
@@ -158,16 +166,16 @@ class ProductionOrchestrator:
                     scene_shots[-1]
                 )
 
-            shot_start_index += len(
-                scene_shots
-            )
-
             scene.shot_ids = [
                 shot.shot_id
                 for shot in scene_shots
             ]
 
             all_shots.extend(
+                scene_shots
+            )
+
+            shot_start_index += len(
                 scene_shots
             )
 
@@ -239,25 +247,12 @@ class ProductionOrchestrator:
             )
 
         print("=" * 60)
-
-        print(
-            "Production plan saved:"
-        )
-
-        print(
-            output_path
-        )
-
+        print("Production plan saved:")
+        print(output_path)
         print("=" * 60)
 
     def unload_models(
         self,
     ):
 
-        self.story_planner.unload()
-
-        self.character_planner.unload()
-
-        self.scene_planner.unload()
-
-        self.shot_planner.unload()
+        self.model.unload()
