@@ -17,19 +17,40 @@ class ComfyWorkflowAdapter:
         - filename_prefix
         - LoadImage.image
         - VHS_LoadVideo.video
+
+    Handles non-executable graph nodes:
+        - Note
+        - Reroute
+
+    Reroute nodes are resolved so downstream executable nodes
+    connect directly to the original executable source node.
     """
 
-    # UI/documentation nodes that must not be sent to the
+    # ------------------------------------------------------------
+    # UI / documentation nodes that are never sent to the
     # ComfyUI execution API.
+    # ------------------------------------------------------------
+
     UI_ONLY_NODE_TYPES = {
         "Note",
     }
 
-    # UI-only widget values that should not be copied into
-    # the execution API prompt.
+    # ------------------------------------------------------------
+    # Graph helper nodes that should not appear in the API prompt.
     #
-    # These are editor controls / display metadata rather than
-    # executable node inputs.
+    # Unlike Note nodes, Reroute nodes can sit between executable
+    # nodes, so their connections must be resolved before removal.
+    # ------------------------------------------------------------
+
+    REROUTE_NODE_TYPES = {
+        "Reroute",
+    }
+
+    # ------------------------------------------------------------
+    # UI-only widget values that should not be copied into the
+    # execution API prompt.
+    # ------------------------------------------------------------
+
     UI_ONLY_WIDGET_NAMES = {
         "upload",
         "choose video to upload",
@@ -68,28 +89,31 @@ class ComfyWorkflowAdapter:
     ) -> dict[str, Any]:
         """
         Convert a normal ComfyUI graph JSON into
-        the API prompt format.
+        the ComfyUI API prompt format.
 
         Normal workflow format:
 
-            {
-                "nodes": [...],
-                "links": [...]
-            }
+        {
+            "nodes": [...],
+            "links": [...]
+        }
 
         API prompt format:
 
-            {
-                "node_id": {
-                    "class_type": "...",
-                    "inputs": {...}
-                }
+        {
+            "node_id": {
+                "class_type": "...",
+                "inputs": {...}
             }
+        }
         """
 
         workflow = self.workflow_json
 
+        # --------------------------------------------------------
         # Already API-format.
+        # --------------------------------------------------------
+
         if self._is_api_workflow(
             workflow
         ):
@@ -121,9 +145,43 @@ class ComfyWorkflowAdapter:
             )
 
         # --------------------------------------------------------
+        # Build node lookup.
+        #
+        # node_id -> original graph node
+        # --------------------------------------------------------
+
+        node_lookup: dict[
+            str,
+            dict[str, Any],
+        ] = {}
+
+        for node in nodes:
+
+            if not isinstance(
+                node,
+                dict,
+            ):
+                continue
+
+            node_id_value = node.get(
+                "id"
+            )
+
+            if node_id_value is None:
+                continue
+
+            node_lookup[
+                str(node_id_value)
+            ] = node
+
+        # --------------------------------------------------------
         # Build:
         #
         # link_id -> [source_node_id, source_output_index]
+        #
+        # Example:
+        #
+        # 5162 -> ["1206", 0]
         # --------------------------------------------------------
 
         link_lookup: dict[
@@ -146,9 +204,11 @@ class ComfyWorkflowAdapter:
                 continue
 
             link_id = link[0]
+
             source_node_id = str(
                 link[1]
             )
+
             source_output_index = link[2]
 
             link_lookup[
@@ -159,9 +219,9 @@ class ComfyWorkflowAdapter:
             ]
 
         # --------------------------------------------------------
-        # IDs of executable nodes.
-        # Used to make sure a real node never points at a
-        # skipped UI-only node.
+        # Executable nodes.
+        #
+        # Note and Reroute nodes are intentionally excluded.
         # --------------------------------------------------------
 
         executable_node_ids = {
@@ -177,8 +237,172 @@ class ComfyWorkflowAdapter:
                 and node.get("id") is not None
                 and node.get("type")
                 not in self.UI_ONLY_NODE_TYPES
+                and node.get("type")
+                not in self.REROUTE_NODE_TYPES
             )
         }
+
+        # --------------------------------------------------------
+        # Resolve a source connection.
+        #
+        # If:
+        #
+        # Executable A
+        #      ↓
+        # Reroute
+        #      ↓
+        # Reroute
+        #      ↓
+        # Executable B
+        #
+        # then Executable B receives:
+        #
+        # ["A", output_index]
+        #
+        # instead of referencing a Reroute.
+        # --------------------------------------------------------
+
+        def resolve_source(
+            source_node_id: str,
+            source_output_index: int,
+        ) -> list[Any]:
+
+            visited: set[str] = set()
+
+            current_node_id = str(
+                source_node_id
+            )
+
+            current_output_index = (
+                source_output_index
+            )
+
+            while True:
+
+                # Prevent accidental infinite loops.
+                if current_node_id in visited:
+
+                    raise RuntimeError(
+                        "Reroute cycle detected while "
+                        f"resolving node {source_node_id}."
+                    )
+
+                visited.add(
+                    current_node_id
+                )
+
+                source_node = node_lookup.get(
+                    current_node_id
+                )
+
+                if source_node is None:
+
+                    raise RuntimeError(
+                        "Graph references missing "
+                        f"source node {current_node_id}."
+                    )
+
+                source_type = source_node.get(
+                    "type"
+                )
+
+                # ------------------------------------------------
+                # Real executable node reached.
+                # ------------------------------------------------
+
+                if (
+                    source_type
+                    not in self.REROUTE_NODE_TYPES
+                ):
+
+                    if (
+                        current_node_id
+                        not in executable_node_ids
+                    ):
+
+                        raise RuntimeError(
+                            "Graph connection resolves to "
+                            "a skipped/non-executable node "
+                            f"{current_node_id} "
+                            f"({source_type})."
+                        )
+
+                    return [
+                        current_node_id,
+                        current_output_index,
+                    ]
+
+                # ------------------------------------------------
+                # Current node is a Reroute.
+                #
+                # Find its incoming graph connection and continue
+                # walking upstream.
+                # ------------------------------------------------
+
+                reroute_inputs = source_node.get(
+                    "inputs",
+                    [],
+                )
+
+                reroute_link_id = None
+
+                if isinstance(
+                    reroute_inputs,
+                    list,
+                ):
+
+                    # Prefer the first actual linked input.
+                    for reroute_input in reroute_inputs:
+
+                        if not isinstance(
+                            reroute_input,
+                            dict,
+                        ):
+                            continue
+
+                        link_id = reroute_input.get(
+                            "link"
+                        )
+
+                        if link_id is not None:
+
+                            reroute_link_id = link_id
+                            break
+
+                if reroute_link_id is None:
+
+                    raise RuntimeError(
+                        "Reroute node "
+                        f"{current_node_id} "
+                        "has no incoming connection."
+                    )
+
+                upstream_source = (
+                    link_lookup.get(
+                        reroute_link_id
+                    )
+                )
+
+                if upstream_source is None:
+
+                    raise RuntimeError(
+                        "Reroute node "
+                        f"{current_node_id} "
+                        "references missing link "
+                        f"{reroute_link_id}."
+                    )
+
+                current_node_id = str(
+                    upstream_source[0]
+                )
+
+                current_output_index = (
+                    upstream_source[1]
+                )
+
+        # --------------------------------------------------------
+        # Convert executable nodes into API prompt format.
+        # --------------------------------------------------------
 
         api_workflow: dict[
             str,
@@ -202,21 +426,39 @@ class ComfyWorkflowAdapter:
             )
 
             if node_id_value is None:
+
                 raise RuntimeError(
                     "Workflow contains a node "
                     "without an ID."
                 )
 
             if not class_type:
+
                 raise RuntimeError(
                     f"Node {node_id_value} "
                     "has no type."
                 )
 
-            # Skip UI/documentation-only nodes.
+            # ----------------------------------------------------
+            # Skip Note / UI-only nodes.
+            # ----------------------------------------------------
+
             if (
                 class_type
                 in self.UI_ONLY_NODE_TYPES
+            ):
+                continue
+
+            # ----------------------------------------------------
+            # Skip Reroute nodes.
+            #
+            # Their downstream references are resolved directly
+            # to the upstream executable node.
+            # ----------------------------------------------------
+
+            if (
+                class_type
+                in self.REROUTE_NODE_TYPES
             ):
                 continue
 
@@ -233,11 +475,12 @@ class ComfyWorkflowAdapter:
             # Named widgets
             #
             # Examples:
-            #   text
-            #   noise_seed
-            #   filename_prefix
-            #   image
-            #   video
+            #
+            # text
+            # noise_seed
+            # filename_prefix
+            # image
+            # video
             # ----------------------------------------------------
 
             named_widgets = node.get(
@@ -311,6 +554,10 @@ class ComfyWorkflowAdapter:
                         )
                     )
 
+                    # ------------------------------------------------
+                    # Connected graph input.
+                    # ------------------------------------------------
+
                     if link_id is not None:
 
                         source = (
@@ -320,6 +567,7 @@ class ComfyWorkflowAdapter:
                         )
 
                         if source is None:
+
                             raise RuntimeError(
                                 f"Node {node_id} "
                                 f"input '{input_name}' "
@@ -327,30 +575,22 @@ class ComfyWorkflowAdapter:
                                 f"link {link_id}."
                             )
 
-                        source_node_id = (
-                            source[0]
-                        )
-
-                        # A graph connection cannot
-                        # originate from a skipped
-                        # UI-only node.
-                        if (
-                            source_node_id
-                            not in executable_node_ids
-                        ):
-                            raise RuntimeError(
-                                f"Node {node_id} "
-                                f"input '{input_name}' "
-                                f"references skipped/"
-                                f"non-executable node "
-                                f"{source_node_id}."
+                        resolved_source = (
+                            resolve_source(
+                                str(source[0]),
+                                source[1],
                             )
+                        )
 
                         api_inputs[
                             input_name
                         ] = copy.deepcopy(
-                            source
+                            resolved_source
                         )
+
+                    # ------------------------------------------------
+                    # Literal/default value.
+                    # ------------------------------------------------
 
                     elif (
                         "value"
@@ -373,12 +613,17 @@ class ComfyWorkflowAdapter:
             }
 
         if not api_workflow:
+
             raise RuntimeError(
                 "No executable nodes found in: "
                 f"{self.workflow_path}"
             )
 
         return api_workflow
+
+    # ============================================================
+    # CHECK API WORKFLOW
+    # ============================================================
 
     @staticmethod
     def _is_api_workflow(
@@ -453,12 +698,14 @@ class ComfyWorkflowAdapter:
         )
 
         if positive_prompt:
+
             self.set_prompt(
                 result,
                 positive_prompt,
             )
 
         if negative_prompt:
+
             self.set_negative_prompt(
                 result,
                 negative_prompt,
@@ -490,6 +737,7 @@ class ComfyWorkflowAdapter:
                     )
                     and value.strip()
                 ):
+
                     return value.strip()
 
             return None
@@ -509,6 +757,7 @@ class ComfyWorkflowAdapter:
                 )
                 and value.strip()
             ):
+
                 return value.strip()
 
         return None
@@ -547,6 +796,7 @@ class ComfyWorkflowAdapter:
             )
 
             if "text" in inputs:
+
                 result.append(
                     (
                         node_id,
@@ -570,6 +820,7 @@ class ComfyWorkflowAdapter:
         )
 
         if not candidates:
+
             raise RuntimeError(
                 "No CLIPTextEncode node "
                 "with a text input was found."
@@ -586,11 +837,13 @@ class ComfyWorkflowAdapter:
             ).strip()
 
             if not current:
+
                 node[
                     "inputs"
                 ][
                     "text"
                 ] = prompt
+
                 return
 
         # Otherwise select the first node
@@ -651,6 +904,7 @@ class ComfyWorkflowAdapter:
         )
 
         if not candidates:
+
             raise RuntimeError(
                 "No CLIPTextEncode node "
                 "with a text input was found."
@@ -718,7 +972,10 @@ class ComfyWorkflowAdapter:
         seed: int,
     ) -> None:
 
-        seed = int(seed)
+        seed = int(
+            seed
+        )
+
         updated = False
 
         for node in workflow.values():
@@ -742,6 +999,7 @@ class ComfyWorkflowAdapter:
                     updated = True
 
         if not updated:
+
             raise RuntimeError(
                 "No seed or noise_seed input "
                 "was found."
@@ -778,6 +1036,7 @@ class ComfyWorkflowAdapter:
                 updated = True
 
         if not updated:
+
             raise RuntimeError(
                 "No filename_prefix input "
                 "was found."
@@ -808,14 +1067,6 @@ class ComfyWorkflowAdapter:
                 {},
             )
 
-            if "image" in inputs:
-                inputs[
-                    "image"
-                ] = filename
-                return
-
-            # In case the API conversion did not include
-            # the image widget for some reason, create it.
             inputs[
                 "image"
             ] = filename
@@ -851,14 +1102,6 @@ class ComfyWorkflowAdapter:
                 {},
             )
 
-            if "video" in inputs:
-                inputs[
-                    "video"
-                ] = filename
-                return
-
-            # In case the API conversion did not include
-            # the video widget for some reason, create it.
             inputs[
                 "video"
             ] = filename
