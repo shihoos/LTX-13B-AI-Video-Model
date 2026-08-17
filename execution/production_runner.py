@@ -31,15 +31,36 @@ from scheduler.gpu_scheduler import (
 
 class ProductionRunner:
 
+    """
+    Production orchestrator.
+
+    Pipeline:
+
+        Shot
+          ↓
+        Base ComfyUI workflow
+          ↓
+        raw clip
+          ↓
+        IC-LoRA/detail/upscale ComfyUI workflow
+          ↓
+        high-resolution master clip
+          ↓
+        FFmpeg assembly
+
+    Two GPU workers can process independent shots concurrently.
+    """
+
     def __init__(
         self,
         project_root: Path,
         gpu_urls: dict[int, str],
         workflow_path: Path,
+        detailer_workflow_path: Path | None = None,
     ):
 
-        self.project_root = (
-            Path(project_root)
+        self.project_root = Path(
+            project_root
         )
 
         self.production_dir = (
@@ -47,24 +68,81 @@ class ProductionRunner:
             / "production"
         )
 
+        # ----------------------------------------------------
+        # Detailer workflow path
+        # ----------------------------------------------------
+
+        if detailer_workflow_path is None:
+
+            detailer_workflow_path = (
+                self.project_root
+                / "workflows"
+                / "detailer"
+                / "ltxv-13b-098-ic-lora-upscale.json"
+            )
+
+        self.workflow_path = Path(
+            workflow_path
+        )
+
+        self.detailer_workflow_path = Path(
+            detailer_workflow_path
+        )
+
+        # ----------------------------------------------------
+        # Validate workflows immediately.
+        # Fail before GPU work starts.
+        # ----------------------------------------------------
+
+        if not self.workflow_path.is_file():
+
+            raise FileNotFoundError(
+                f"Base workflow not found:\n"
+                f"{self.workflow_path}"
+            )
+
+        if not self.detailer_workflow_path.is_file():
+
+            raise FileNotFoundError(
+                f"IC-LoRA detailer workflow not found:\n"
+                f"{self.detailer_workflow_path}"
+            )
+
+        # ----------------------------------------------------
+        # Persistent state
+        # ----------------------------------------------------
+
         self.checkpoints = (
             CheckpointManager(
                 self.production_dir
             )
         )
 
+        # ----------------------------------------------------
+        # Separate adapters for separate workflows.
+        # ----------------------------------------------------
+
         self.workflow_adapter = (
             ComfyWorkflowAdapter(
-                workflow_path
+                self.workflow_path
             )
         )
+
+        self.detailer_workflow_adapter = (
+            ComfyWorkflowAdapter(
+                self.detailer_workflow_path
+            )
+        )
+
+        # ----------------------------------------------------
+        # One ComfyUI client per GPU.
+        # ----------------------------------------------------
 
         self.clients = {
             gpu_id: ComfyClient(
                 base_url=url
             )
-            for gpu_id, url
-            in gpu_urls.items()
+            for gpu_id, url in gpu_urls.items()
         }
 
         self.scheduler = (
@@ -85,6 +163,10 @@ class ProductionRunner:
             )
         )
 
+    # ========================================================
+    # PREPARE
+    # ========================================================
+
     def prepare(
         self,
         production_plan: dict,
@@ -104,6 +186,10 @@ class ProductionRunner:
                     "scene_id"
                 ],
             )
+
+    # ========================================================
+    # RUN COMPLETE PRODUCTION
+    # ========================================================
 
     def run(
         self,
@@ -128,8 +214,28 @@ class ProductionRunner:
                 ]
             )
 
-            if self.checkpoints.is_complete(
-                shot_id
+            state = (
+                self.checkpoints.get_shot(
+                    shot_id
+                )
+            )
+
+            # ------------------------------------------------
+            # Truly complete only when final upscaled
+            # artifact exists.
+            # ------------------------------------------------
+
+            if (
+                state
+                and state.get(
+                    "status"
+                ) == "completed"
+                and state.get(
+                    "upscaled_path"
+                )
+                and Path(
+                    state["upscaled_path"]
+                ).exists()
             ):
 
                 print(
@@ -150,12 +256,20 @@ class ProductionRunner:
             f"{len(pending_shots)}"
         )
 
+        # ----------------------------------------------------
+        # Two GPU workers execute independent shots in parallel.
+        # ----------------------------------------------------
+
         if pending_shots:
 
             self.scheduler.run(
                 pending_shots,
                 self._run_one_shot,
             )
+
+        # ----------------------------------------------------
+        # Verify EVERY shot has final output.
+        # ----------------------------------------------------
 
         completed = []
 
@@ -165,45 +279,40 @@ class ProductionRunner:
             ]
         ):
 
+            shot_id = (
+                shot_data[
+                    "shot_id"
+                ]
+            )
+
             state = (
-                self.checkpoints
-                .get_shot(
-                    shot_data[
-                        "shot_id"
-                    ]
+                self.checkpoints.get_shot(
+                    shot_id
                 )
             )
 
             if not state:
                 continue
 
+            final_path = (
+                state.get(
+                    "upscaled_path"
+                )
+            )
+
             if (
-                state["status"]
-                == "completed"
+                state.get(
+                    "status"
+                ) == "completed"
+                and final_path
+                and Path(
+                    final_path
+                ).exists()
             ):
 
-                path = (
-                    state.get(
-                        "upscaled_path"
-                    )
-                    or state.get(
-                        "detailer_path"
-                    )
-                    or state.get(
-                        "raw_path"
-                    )
+                completed.append(
+                    final_path
                 )
-
-                if (
-                    path
-                    and Path(
-                        path
-                    ).exists()
-                ):
-
-                    completed.append(
-                        path
-                    )
 
         if len(completed) != len(
             production_plan[
@@ -215,6 +324,10 @@ class ProductionRunner:
                 "Not all shots are complete. "
                 "FFmpeg assembly was not started."
             )
+
+        # ----------------------------------------------------
+        # Avoid re-running FFmpeg if the final movie exists.
+        # ----------------------------------------------------
 
         existing = (
             self.checkpoints.state[
@@ -243,6 +356,10 @@ class ProductionRunner:
                 existing["path"]
             )
 
+        # ----------------------------------------------------
+        # Assemble final movie.
+        # ----------------------------------------------------
+
         self.checkpoints.set_assembly_started()
 
         try:
@@ -270,6 +387,10 @@ class ProductionRunner:
 
             raise
 
+    # ========================================================
+    # ONE SHOT ON ONE GPU
+    # ========================================================
+
     def _run_one_shot(
         self,
         gpu_id: int,
@@ -292,6 +413,9 @@ class ProductionRunner:
             workflow_adapter=(
                 self.workflow_adapter
             ),
+            detailer_workflow_adapter=(
+                self.detailer_workflow_adapter
+            ),
             checkpoint_manager=(
                 self.checkpoints
             ),
@@ -312,6 +436,10 @@ class ProductionRunner:
                 self.output_dir
             ),
         )
+
+    # ========================================================
+    # DICT → Shot
+    # ========================================================
 
     @staticmethod
     def _dict_to_shot(
