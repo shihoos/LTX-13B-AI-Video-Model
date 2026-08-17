@@ -3,7 +3,8 @@ import json
 from datetime import datetime
 
 from planner.config import (
-    DATA_DIR,
+    PRODUCTION_DIR,
+    ensure_directories,
 )
 
 from planner.qwen_loader import (
@@ -12,6 +13,10 @@ from planner.qwen_loader import (
 
 from planner.story_planner import (
     StoryPlanner,
+)
+
+from planner.character_detector import (
+    CharacterDetector,
 )
 
 from planner.character_planner import (
@@ -35,10 +40,20 @@ class ProductionOrchestrator:
 
     def __init__(self):
 
-        self.model = QwenStoryModel()
+        ensure_directories()
+
+        self.model = (
+            QwenStoryModel()
+        )
 
         self.story_planner = (
             StoryPlanner(
+                model=self.model
+            )
+        )
+
+        self.character_detector = (
+            CharacterDetector(
                 model=self.model
             )
         )
@@ -69,29 +84,57 @@ class ProductionOrchestrator:
         self,
         mode: str,
         user_input: str,
-        character_names: list,
     ) -> dict:
 
         print("=" * 60)
         print("STEP 1: Creating story")
         print("=" * 60)
 
-        story = self.story_planner.plan(
-            mode=mode,
-            user_input=user_input,
+        story = (
+            self.story_planner.plan(
+                mode=mode,
+                user_input=user_input,
+            )
         )
 
         print("Story created.")
 
         print("=" * 60)
-        print("STEP 2: Creating character plan")
+        print(
+            "STEP 2: Detecting characters"
+        )
+        print("=" * 60)
+
+        character_names = (
+            self.character_detector
+            .detect(
+                story=story
+            )
+        )
+
+        print(
+            "Characters detected:"
+        )
+
+        for name in character_names:
+
+            print(
+                f" - {name}"
+            )
+
+        print("=" * 60)
+        print(
+            "STEP 3: Creating character plan"
+        )
         print("=" * 60)
 
         characters = (
             self.character_planner
             .create_character_plan(
                 story=story,
-                character_names=character_names,
+                character_names=(
+                    character_names
+                ),
             )
         )
 
@@ -101,7 +144,9 @@ class ProductionOrchestrator:
         )
 
         print("=" * 60)
-        print("STEP 3: Creating scene plan")
+        print(
+            "STEP 4: Creating scene plan"
+        )
         print("=" * 60)
 
         scenes = (
@@ -128,7 +173,7 @@ class ProductionOrchestrator:
             print("=" * 60)
 
             print(
-                f"STEP 4: Planning "
+                f"STEP 5: Planning "
                 f"{scene.scene_id}"
             )
 
@@ -147,8 +192,12 @@ class ProductionOrchestrator:
                     story=story,
                     characters=characters,
                     scene=scene,
-                    continuity_context=continuity_context,
-                    shot_start_index=shot_start_index,
+                    continuity_context=(
+                        continuity_context
+                    ),
+                    shot_start_index=(
+                        shot_start_index
+                    ),
                 )
             )
 
@@ -156,20 +205,22 @@ class ProductionOrchestrator:
                 self.continuity_manager
                 .apply_scene_continuity(
                     shots=scene_shots,
-                    previous_shot=previous_shot,
+                    previous_shot=(
+                        previous_shot
+                    ),
                 )
             )
+
+            scene.shot_ids = [
+                shot.shot_id
+                for shot in scene_shots
+            ]
 
             if scene_shots:
 
                 previous_shot = (
                     scene_shots[-1]
                 )
-
-            scene.shot_ids = [
-                shot.shot_id
-                for shot in scene_shots
-            ]
 
             all_shots.extend(
                 scene_shots
@@ -192,24 +243,39 @@ class ProductionOrchestrator:
 
             "story": story,
 
+            "character_names": (
+                character_names
+            ),
+
             "characters": [
                 character.to_dict()
-                for character in characters
+                for character
+                in characters
             ],
 
             "scenes": [
                 scene.to_dict()
-                for scene in scenes
+                for scene
+                in scenes
             ],
 
             "shots": [
                 shot.to_dict()
-                for shot in all_shots
+                for shot
+                in all_shots
             ],
         }
 
-        self.save_production_plan(
-            production_plan
+        output_path = (
+            self.save_production_plan(
+                production_plan
+            )
+        )
+
+        production_plan[
+            "production_plan_path"
+        ] = str(
+            output_path
         )
 
         return production_plan
@@ -219,18 +285,8 @@ class ProductionOrchestrator:
         production_plan: dict,
     ):
 
-        output_dir = (
-            DATA_DIR
-            / "production"
-        )
-
-        output_dir.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
         output_path = (
-            output_dir
+            PRODUCTION_DIR
             / "production_plan.json"
         )
 
@@ -247,12 +303,19 @@ class ProductionOrchestrator:
             )
 
         print("=" * 60)
-        print("Production plan saved:")
-        print(output_path)
+
+        print(
+            "Production plan saved:"
+        )
+
+        print(
+            output_path
+        )
+
         print("=" * 60)
 
-    def unload_models(
-        self,
-    ):
+        return output_path
+
+    def unload_models(self):
 
         self.model.unload()
