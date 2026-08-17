@@ -1,7 +1,5 @@
 import gc
 
-from pathlib import Path
-
 import torch
 
 from transformers import (
@@ -10,27 +8,28 @@ from transformers import (
 )
 
 from planner.config import (
-    KAGGLE_INPUT_DIR,
+    QWEN_KAGGLE_PATH,
     QWEN_LOCAL_PATH,
-    QWEN_MAX_NEW_TOKENS,
     QWEN_MODEL_ID,
+    QWEN_MAX_NEW_TOKENS,
     QWEN_TEMPERATURE,
     QWEN_TOP_P,
 )
 
 
 class QwenStoryModel:
+
     """
-    Loads and manages the Qwen story planning model.
+    Loads and manages Qwen for:
 
-    Loading priority:
+    - Story creation
+    - Character detection
+    - Character planning
+    - Scene planning
+    - Shot planning
 
-    1. Explicit QWEN_LOCAL_PATH.
-    2. Automatically detected model inside /kaggle/input.
-    3. Hugging Face model ID.
-
-    A local Kaggle model is always loaded with
-    local_files_only=True to prevent repeated downloads.
+    The model is loaded only when required and can
+    be unloaded before LTX generation begins.
     """
 
     def __init__(
@@ -41,239 +40,80 @@ class QwenStoryModel:
         self.model_id = model_id
 
         self.model = None
-
         self.tokenizer = None
 
-        self.model_source = None
-
-        self.is_local_model = False
-
-    def _is_model_directory(
-        self,
-        path: Path,
-    ) -> bool:
-        """
-        Check whether a directory appears to contain
-        a Hugging Face model.
-        """
-
-        if not path.is_dir():
-
-            return False
-
-        config_path = (
-            path
-            / "config.json"
+        self.model_path = (
+            self._resolve_model_path()
         )
 
-        if not config_path.is_file():
+    def _resolve_model_path(self):
 
-            return False
+        candidates = [
+            QWEN_KAGGLE_PATH,
+            QWEN_LOCAL_PATH,
+        ]
 
-        has_tokenizer = any(
-            [
-                (
-                    path
-                    / "tokenizer.json"
-                ).is_file(),
+        for path in candidates:
 
-                (
-                    path
-                    / "tokenizer_config.json"
-                ).is_file(),
-
-                (
-                    path
-                    / "vocab.json"
-                ).is_file(),
-            ]
-        )
-
-        has_weights = any(
-            path.glob(
-                "*.safetensors"
+            config_path = (
+                path
+                / "config.json"
             )
-        ) or any(
-            path.glob(
-                "*.bin"
+
+            model_index = (
+                path
+                / "model.safetensors.index.json"
             )
-        ) or (
-            path
-            / "model.safetensors.index.json"
-        ).is_file() or (
-            path
-            / "pytorch_model.bin.index.json"
-        ).is_file()
 
-        return (
-            has_tokenizer
-            and has_weights
-        )
-
-    def _find_local_model(
-        self,
-    ) -> Path | None:
-        """
-        Find the Qwen model inside Kaggle input storage.
-        """
-
-        if QWEN_LOCAL_PATH is not None:
-
-            if self._is_model_directory(
-                QWEN_LOCAL_PATH
+            if (
+                config_path.exists()
+                and model_index.exists()
             ):
 
-                return QWEN_LOCAL_PATH
+                return path
 
-            raise FileNotFoundError(
-                "QWEN_LOCAL_PATH was provided, "
-                "but it is not a valid Hugging Face "
-                f"model directory:\n"
-                f"{QWEN_LOCAL_PATH}"
-            )
-
-        if not KAGGLE_INPUT_DIR.exists():
-
-            return None
-
-        if self._is_model_directory(
-            KAGGLE_INPUT_DIR
-        ):
-
-            return KAGGLE_INPUT_DIR
-
-        for path in KAGGLE_INPUT_DIR.rglob(
-            "config.json"
-        ):
-
-            candidate = (
-                path.parent
-            )
-
-            if self._is_model_directory(
-                candidate
-            ):
-
-                return candidate
-
-        return None
-
-    def _resolve_model_source(
-        self,
-    ):
-
-        local_model_path = (
-            self._find_local_model()
+        raise FileNotFoundError(
+            "Qwen model was not found.\n\n"
+            "Expected Kaggle dataset path:\n"
+            f"{QWEN_KAGGLE_PATH}\n\n"
+            "Expected local development path:\n"
+            f"{QWEN_LOCAL_PATH}\n\n"
+            "Attach the Qwen Kaggle dataset before "
+            "running the planner."
         )
 
-        if local_model_path is not None:
-
-            self.model_source = (
-                str(
-                    local_model_path
-                )
-            )
-
-            self.is_local_model = True
-
-            return self.model_source
-
-        self.model_source = (
-            self.model_id
-        )
-
-        self.is_local_model = False
-
-        return self.model_source
-
-    def load(
-        self,
-    ):
-        """
-        Load Qwen only when needed.
-        """
+    def load(self):
 
         if self.model is not None:
-
             return
 
-        source = (
-            self._resolve_model_source()
-        )
-
-        print(
-            "=" * 60
-        )
-
-        print(
-            "Loading Qwen story planner"
-        )
-
-        print(
-            f"Source: {source}"
-        )
-
-        print(
-            f"Local model: "
-            f"{self.is_local_model}"
-        )
-
-        print(
-            "=" * 60
-        )
-
-        load_kwargs = {}
-
-        if self.is_local_model:
-
-            load_kwargs[
-                "local_files_only"
-            ] = True
+        print("=" * 60)
+        print("Loading Qwen story planner")
+        print(f"Model: {self.model_id}")
+        print(f"Path: {self.model_path}")
+        print("=" * 60)
 
         self.tokenizer = (
             AutoTokenizer.from_pretrained(
-                source,
-                **load_kwargs,
+                self.model_path,
+                local_files_only=True,
             )
         )
 
-        model_kwargs = {
-            "torch_dtype": "auto",
-            "device_map": "auto",
-        }
-
-        if self.is_local_model:
-
-            model_kwargs[
-                "local_files_only"
-            ] = True
-
         self.model = (
-            AutoModelForCausalLM
-            .from_pretrained(
-                source,
-                **model_kwargs,
+            AutoModelForCausalLM.from_pretrained(
+                self.model_path,
+                torch_dtype="auto",
+                device_map="auto",
+                local_files_only=True,
             )
         )
 
         self.model.eval()
 
         print(
-            "Qwen story planner "
-            "loaded successfully."
+            "Qwen story planner loaded successfully."
         )
-
-        if torch.cuda.is_available():
-
-            allocated = (
-                torch.cuda.memory_allocated()
-                / 1024**3
-            )
-
-            print(
-                f"GPU memory allocated: "
-                f"{allocated:.2f} GB"
-            )
 
     def generate(
         self,
@@ -284,11 +124,10 @@ class QwenStoryModel:
         temperature: float = (
             QWEN_TEMPERATURE
         ),
-        top_p: float = QWEN_TOP_P,
+        top_p: float = (
+            QWEN_TOP_P
+        ),
     ) -> str:
-        """
-        Generate a response using Qwen chat format.
-        """
 
         if self.model is None:
 
@@ -303,48 +142,60 @@ class QwenStoryModel:
             )
         )
 
-        model_inputs = (
-            self.tokenizer(
-                [text],
-                return_tensors="pt",
-            )
-        )
-
-        model_device = (
-            next(
-                self.model.parameters()
-            ).device
+        model_inputs = self.tokenizer(
+            [text],
+            return_tensors="pt",
         )
 
         model_inputs = {
             key: value.to(
-                model_device
+                self.model.device
             )
-            for key, value in (
-                model_inputs.items()
-            )
+            for key, value
+            in model_inputs.items()
         }
+
+        generation_kwargs = {
+            **model_inputs,
+            "max_new_tokens": (
+                max_new_tokens
+            ),
+        }
+
+        if temperature <= 0:
+
+            generation_kwargs[
+                "do_sample"
+            ] = False
+
+        else:
+
+            generation_kwargs[
+                "do_sample"
+            ] = True
+
+            generation_kwargs[
+                "temperature"
+            ] = temperature
+
+            generation_kwargs[
+                "top_p"
+            ] = top_p
 
         with torch.no_grad():
 
             output_ids = (
                 self.model.generate(
-                    **model_inputs,
-                    max_new_tokens=max_new_tokens,
-                    do_sample=True,
-                    temperature=temperature,
-                    top_p=top_p,
+                    **generation_kwargs
                 )
             )
 
-        generated_ids = (
-            output_ids[
-                :,
-                model_inputs[
-                    "input_ids"
-                ].shape[1]:
-            ]
-        )
+        generated_ids = output_ids[
+            :,
+            model_inputs[
+                "input_ids"
+            ].shape[1]:
+        ]
 
         response = (
             self.tokenizer
@@ -356,27 +207,20 @@ class QwenStoryModel:
 
         return response.strip()
 
-    def unload(
-        self,
-    ):
-        """
-        Release Qwen from memory.
-        """
+    def unload(self):
+
+        print(
+            "Unloading Qwen story planner..."
+        )
 
         if self.model is not None:
 
-            print(
-                "Unloading Qwen story planner..."
-            )
-
             del self.model
-
             self.model = None
 
         if self.tokenizer is not None:
 
             del self.tokenizer
-
             self.tokenizer = None
 
         gc.collect()
@@ -385,27 +229,13 @@ class QwenStoryModel:
 
             torch.cuda.empty_cache()
 
-            torch.cuda.synchronize()
+            try:
 
-            allocated = (
-                torch.cuda.memory_allocated()
-                / 1024**3
-            )
+                torch.cuda.ipc_collect()
 
-            reserved = (
-                torch.cuda.memory_reserved()
-                / 1024**3
-            )
+            except RuntimeError:
 
-            print(
-                f"GPU allocated after unload: "
-                f"{allocated:.2f} GB"
-            )
-
-            print(
-                f"GPU reserved after unload: "
-                f"{reserved:.2f} GB"
-            )
+                pass
 
         print(
             "Qwen memory released."
