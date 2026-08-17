@@ -46,21 +46,43 @@ class StoryPlanner:
             encoding="utf-8"
         )
 
+    def _replace(
+        self,
+        template: str,
+        **values,
+    ) -> str:
+
+        prompt = template
+
+        for key, value in values.items():
+
+            prompt = prompt.replace(
+                "{" + key + "}",
+                str(value),
+            )
+
+        return prompt
+
     def create_story(
         self,
         user_request: str,
     ) -> str:
 
-        system_prompt = self._read_prompt(
-            "system.txt"
+        system_prompt = (
+            self._read_prompt(
+                "system.txt"
+            )
         )
 
-        template = self._read_prompt(
-            "create_story.txt"
+        template = (
+            self._read_prompt(
+                "create_story.txt"
+            )
         )
 
-        prompt = template.format(
-            user_request=user_request
+        prompt = self._replace(
+            template,
+            user_request=user_request,
         )
 
         messages = [
@@ -83,16 +105,21 @@ class StoryPlanner:
         user_story: str,
     ) -> str:
 
-        system_prompt = self._read_prompt(
-            "system.txt"
+        system_prompt = (
+            self._read_prompt(
+                "system.txt"
+            )
         )
 
-        template = self._read_prompt(
-            "preserve_story.txt"
+        template = (
+            self._read_prompt(
+                "preserve_story.txt"
+            )
         )
 
-        prompt = template.format(
-            user_story=user_story
+        prompt = self._replace(
+            template,
+            user_story=user_story,
         )
 
         messages = [
@@ -117,9 +144,9 @@ class StoryPlanner:
     ) -> str:
 
         request = (
-            "Expand the following idea into a complete "
-            "cinematic story while preserving its core "
-            "concept:\n\n"
+            "Expand the following idea into "
+            "a complete cinematic story while "
+            "preserving its core concept:\n\n"
             f"{user_idea}"
         )
 
@@ -139,13 +166,19 @@ class StoryPlanner:
                 user_input
             )
 
-        if mode == PRESERVE_USER_STORY_MODE:
+        if (
+            mode
+            == PRESERVE_USER_STORY_MODE
+        ):
 
             return self.preserve_story(
                 user_input
             )
 
-        if mode == EXPAND_USER_STORY_MODE:
+        if (
+            mode
+            == EXPAND_USER_STORY_MODE
+        ):
 
             return self.expand_story(
                 user_input
