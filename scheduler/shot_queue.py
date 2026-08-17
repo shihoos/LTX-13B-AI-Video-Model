@@ -12,20 +12,20 @@ class ShotQueue:
 
         for shot in shots:
 
-            self.queue.put(shot)
+            self.queue.put(
+                shot
+            )
 
     def get(self):
 
-        if self.queue.empty():
+        try:
+
+            return self.queue.get_nowait()
+
+        except Exception:
 
             return None
-
-        return self.queue.get()
 
     def task_done(self):
 
         self.queue.task_done()
-
-    def empty(self):
-
-        return self.queue.empty()
