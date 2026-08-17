@@ -36,11 +36,7 @@ class CharacterPlanner:
             ReferenceManager()
         )
 
-    def create_character_plan(
-        self,
-        story: str,
-        character_names: list,
-    ) -> list:
+    def _read_prompt(self) -> str:
 
         project_root = (
             Path(__file__)
@@ -55,8 +51,35 @@ class CharacterPlanner:
             / "character_plan.txt"
         )
 
-        template = prompt_path.read_text(
+        return prompt_path.read_text(
             encoding="utf-8"
+        )
+
+    def _replace(
+        self,
+        template: str,
+        **values,
+    ) -> str:
+
+        prompt = template
+
+        for key, value in values.items():
+
+            prompt = prompt.replace(
+                "{" + key + "}",
+                str(value),
+            )
+
+        return prompt
+
+    def create_character_plan(
+        self,
+        story: str,
+        character_names: list,
+    ) -> list:
+
+        template = (
+            self._read_prompt()
         )
 
         reference_data = {}
@@ -65,14 +88,18 @@ class CharacterPlanner:
 
             reference_data[name] = (
                 self.references
-                .get_character_source(name)
+                .get_character_source(
+                    name
+                )
             )
 
-        prompt = template.format(
+        prompt = self._replace(
+            template,
             story=story,
             references=json.dumps(
                 reference_data,
                 indent=2,
+                ensure_ascii=False,
             ),
         )
 
@@ -101,18 +128,31 @@ class CharacterPlanner:
 
         characters = []
 
+        references_by_name = {
+            name.lower(): reference
+            for name, reference
+            in reference_data.items()
+        }
+
         for item in data.get(
             "characters",
             [],
         ):
 
-            name = item.get(
-                "name",
-                "",
-            )
+            name = str(
+                item.get(
+                    "name",
+                    "",
+                )
+            ).strip()
 
-            reference = reference_data.get(
-                name
+            if not name:
+                continue
+
+            reference = (
+                references_by_name.get(
+                    name.lower()
+                )
             )
 
             if reference is None:
@@ -126,9 +166,7 @@ class CharacterPlanner:
 
             characters.append(
                 Character(
-                    character_id=item.get(
-                        "character_id"
-                    ) or (
+                    character_id=(
                         f"character_"
                         f"{len(characters) + 1:03d}"
                     ),
@@ -165,13 +203,17 @@ class CharacterPlanner:
                         [],
                     ),
 
-                    reference_mode=reference.get(
-                        "mode",
-                        "auto",
+                    reference_mode=(
+                        reference.get(
+                            "mode",
+                            "auto",
+                        )
                     ),
 
-                    reference_path=reference.get(
-                        "path"
+                    reference_path=(
+                        reference.get(
+                            "path"
+                        )
                     ),
 
                     continuity_rules=item.get(
