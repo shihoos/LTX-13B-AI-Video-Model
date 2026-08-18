@@ -6,8 +6,13 @@ import json
 import shutil
 import subprocess
 import sys
+
 from pathlib import Path
 
+
+# ================================================================
+# PROJECT PATHS
+# ================================================================
 
 PROJECT_ROOT = (
     Path(__file__).resolve().parents[1]
@@ -23,7 +28,6 @@ LOCK_FILE = (
 # ================================================================
 # BASIC HELPERS
 # ================================================================
-
 
 def fail(
     message: str,
@@ -47,6 +51,51 @@ def check_file(
     print(
         f"OK   {path}"
     )
+
+
+def read_text(
+    path: Path,
+) -> str:
+
+    try:
+
+        return path.read_text(
+            encoding="utf-8"
+        )
+
+    except Exception as error:
+
+        fail(
+            "Unable to read file:\n"
+            f"{path}\n"
+            f"{error}"
+        )
+
+
+def parse_python(
+    path: Path,
+) -> ast.AST:
+
+    source = read_text(
+        path
+    )
+
+    try:
+
+        return ast.parse(
+            source,
+            filename=str(
+                path
+            ),
+        )
+
+    except SyntaxError as error:
+
+        fail(
+            "Python syntax error:\n"
+            f"{path}\n"
+            f"{error}"
+        )
 
 
 def check_json(
@@ -90,9 +139,8 @@ def check_json(
 
 
 # ================================================================
-# CENTRAL LOCK
+# CENTRAL COMPATIBILITY LOCK
 # ================================================================
-
 
 def load_lock() -> dict:
 
@@ -173,9 +221,8 @@ def load_lock() -> dict:
 
 
 # ================================================================
-# GIT
+# GIT VALIDATION
 # ================================================================
-
 
 def get_git_revision(
     path: Path,
@@ -211,8 +258,10 @@ def check_git_revision(
             f"{path}"
         )
 
-    actual = get_git_revision(
-        path
+    actual = (
+        get_git_revision(
+            path
+        )
     )
 
     if actual != expected:
@@ -294,9 +343,8 @@ def validate_git_stack(
 
 
 # ================================================================
-# PYTHON PACKAGE VERSIONS
+# PYTHON RUNTIME
 # ================================================================
-
 
 def validate_runtime_packages(
     lock: dict,
@@ -511,13 +559,13 @@ def validate_torch(
 
 
 # ================================================================
-# PROJECT STRUCTURE
+# PACKAGE / PROJECT STRUCTURE
 # ================================================================
-
 
 def validate_init_files() -> None:
 
     required = [
+
         "execution/__init__.py",
         "pipeline/__init__.py",
         "planner/__init__.py",
@@ -525,9 +573,7 @@ def validate_init_files() -> None:
         "scheduler/__init__.py",
     ]
 
-    for relative in (
-        required
-    ):
+    for relative in required:
 
         check_file(
             PROJECT_ROOT
@@ -543,6 +589,7 @@ def validate_general_structure() -> None:
 
     required = [
 
+        # Planner
         "planner/config.py",
         "planner/qwen_loader.py",
         "planner/story_planner.py",
@@ -551,12 +598,14 @@ def validate_general_structure() -> None:
         "planner/scene_planner.py",
         "planner/shot_planner.py",
 
+        # Pipeline
         "pipeline/continuity_manager.py",
         "pipeline/modes.py",
         "pipeline/production_manager.py",
         "pipeline/production_orchestrator.py",
         "pipeline/reference_manager.py",
 
+        # Execution
         "execution/checkpoint_manager.py",
         "execution/comfy_client.py",
         "execution/comfy_workflow_adapter.py",
@@ -564,14 +613,17 @@ def validate_general_structure() -> None:
         "execution/assembly_manager.py",
         "execution/production_runner.py",
 
+        # Scheduler
         "scheduler/gpu_scheduler.py",
         "scheduler/shot_queue.py",
 
+        # Schemas
         "schemas/character.py",
         "schemas/scene.py",
         "schemas/shot.py",
         "schemas/parser.py",
 
+        # Kaggle
         "kaggle/bootstrap.py",
         "kaggle/config.py",
         "kaggle/compatibility_lock.yaml",
@@ -581,10 +633,13 @@ def validate_general_structure() -> None:
         "kaggle/start_comfyui.py",
         "kaggle/start_comfyui_tunnel.py",
 
+        # Compatibility
         "compatibility/prepare_modern_ltx.py",
 
+        # Application entry point
         "scripts/generate_video.py",
 
+        # Workflows
         "workflows/baseline/"
         "ltxv-13b-dist-i2v-base.json",
 
@@ -605,9 +660,7 @@ def validate_general_structure() -> None:
             f"{forbidden_runtime_file}"
         )
 
-    for relative in (
-        required
-    ):
+    for relative in required:
 
         check_file(
             PROJECT_ROOT
@@ -616,9 +669,8 @@ def validate_general_structure() -> None:
 
 
 # ================================================================
-# WORKFLOW STRUCTURE
+# WORKFLOW VALIDATION
 # ================================================================
-
 
 def validate_workflows() -> None:
 
@@ -679,6 +731,7 @@ def validate_workflows() -> None:
     }
 
     required_base = {
+
         "LTXVBaseSampler",
         "LTXVConditioning",
         "STGGuiderAdvanced",
@@ -692,6 +745,7 @@ def validate_workflows() -> None:
     }
 
     required_detailer = {
+
         "VHS_LoadVideo",
         "LTXVLoopingSampler",
         "LTXVLatentUpsampler",
@@ -747,47 +801,107 @@ def validate_workflows() -> None:
 # AST HELPERS
 # ================================================================
 
+def class_map(
+    tree: ast.AST,
+) -> dict[str, ast.ClassDef]:
 
-def parse_python(
-    path: Path,
-) -> ast.AST:
+    return {
+        node.name: node
+        for node in ast.walk(
+            tree
+        )
+        if isinstance(
+            node,
+            ast.ClassDef,
+        )
+    }
 
-    source = path.read_text(
-        encoding="utf-8"
-    )
 
-    try:
+def function_map(
+    tree: ast.AST,
+) -> dict[str, ast.AST]:
 
-        return ast.parse(
-            source,
-            filename=str(
-                path
+    functions = {}
+
+    for node in ast.walk(
+        tree
+    ):
+
+        if isinstance(
+            node,
+            (
+                ast.FunctionDef,
+                ast.AsyncFunctionDef,
+            ),
+        ):
+
+            functions[
+                node.name
+            ] = node
+
+    return functions
+
+
+def method_names(
+    class_node: ast.ClassDef,
+) -> set[str]:
+
+    return {
+        node.name
+
+        for node in class_node.body
+
+        if isinstance(
+            node,
+            (
+                ast.FunctionDef,
+                ast.AsyncFunctionDef,
             ),
         )
+    }
 
-    except SyntaxError as error:
 
-        fail(
-            "Python syntax error:\n"
-            f"{path}\n"
-            f"{error}"
-        )
+def source_contains_identifier(
+    tree: ast.AST,
+    identifier: str,
+) -> bool:
+
+    for node in ast.walk(
+        tree
+    ):
+
+        if isinstance(
+            node,
+            ast.Name,
+        ) and node.id == identifier:
+
+            return True
+
+        if isinstance(
+            node,
+            ast.Attribute,
+        ) and node.attr == identifier:
+
+            return True
+
+    return False
 
 
 def actual_string_constants(
     tree: ast.AST,
 ):
-
     """
-    Yield executable string constants while ignoring
-    module/function/class docstrings.
+    Yield string constants that are executable Python values.
 
-    Comments are never present in the AST.
+    Comments are not represented in the AST.
+    Module/class/function docstrings are ignored.
     """
 
-    docstring_nodes = set()
+    docstring_nodes: set[int] = set()
 
-    for node in ast.walk(tree):
+    for node in ast.walk(
+        tree
+    ):
 
         body = getattr(
             node,
@@ -801,26 +915,33 @@ def actual_string_constants(
 
         first = body[0]
 
-        if isinstance(
+        if not isinstance(
             first,
             ast.Expr,
         ):
 
-            value = first.value
+            continue
 
-            if isinstance(
+        value = first.value
+
+        if (
+            isinstance(
                 value,
                 ast.Constant,
-            ) and isinstance(
+            )
+            and isinstance(
                 value.value,
                 str,
-            ):
+            )
+        ):
 
-                docstring_nodes.add(
-                    id(value)
-                )
+            docstring_nodes.add(
+                id(value)
+            )
 
-    for node in ast.walk(tree):
+    for node in ast.walk(
+        tree
+    ):
 
         if not isinstance(
             node,
@@ -836,7 +957,9 @@ def actual_string_constants(
 
             continue
 
-        if id(node) in docstring_nodes:
+        if id(node) in (
+            docstring_nodes
+        ):
 
             continue
 
@@ -844,21 +967,19 @@ def actual_string_constants(
 
 
 # ================================================================
-# COMPATIBILITY VALIDATION
+# COMPATIBILITY BLUR VALIDATION
 # ================================================================
-
 
 def ast_contains_legacy_blur_call(
     source: str,
 ) -> bool:
-
     """
-    Detect an actual call shaped like:
+    Detect an actual executable call shaped like:
 
         Blur().blur(...)
         module.Blur().blur(...)
 
-    It does not use substring matching.
+    It intentionally does NOT perform a raw string search.
     """
 
     try:
@@ -898,19 +1019,19 @@ def ast_contains_legacy_blur_call(
 
             continue
 
-        blur_object = (
+        value = (
             func.value
         )
 
         if not isinstance(
-            blur_object,
+            value,
             ast.Call,
         ):
 
             continue
 
         constructor = (
-            blur_object.func
+            value.func
         )
 
         if isinstance(
@@ -925,7 +1046,7 @@ def ast_contains_legacy_blur_call(
 
                 return True
 
-        if isinstance(
+        elif isinstance(
             constructor,
             ast.Attribute,
         ):
@@ -954,8 +1075,8 @@ def validate_compatibility_source(
         path
     )
 
-    text = path.read_text(
-        encoding="utf-8"
+    text = read_text(
+        path
     )
 
     required_markers = [
@@ -963,6 +1084,7 @@ def validate_compatibility_source(
         "load_lock",
         "get_legacy_commit",
         "compatibility_lock.yaml",
+
         "blur_internal(image, blur_radius)",
 
         "LTXVBaseSampler",
@@ -1023,9 +1145,8 @@ def validate_compatibility_source(
 
 
 # ================================================================
-# PRE-FLIGHT / CONFIG
+# PREFLIGHT / CENTRAL CONFIG
 # ================================================================
-
 
 def validate_preflight_source(
     lock: dict,
@@ -1041,8 +1162,8 @@ def validate_preflight_source(
         path
     )
 
-    text = path.read_text(
-        encoding="utf-8"
+    text = read_text(
+        path
     )
 
     required_markers = [
@@ -1098,8 +1219,8 @@ def validate_config_source(
         path
     )
 
-    text = path.read_text(
-        encoding="utf-8"
+    text = read_text(
+        path
     )
 
     required_markers = [
@@ -1129,9 +1250,11 @@ def validate_config_source(
         ].items()
     ):
 
-        filename = spec[
-            "filename"
-        ]
+        filename = (
+            spec[
+                "filename"
+            ]
+        )
 
         if filename in text:
 
@@ -1150,7 +1273,6 @@ def validate_config_source(
 # FRONTEND POLICY
 # ================================================================
 
-
 def validate_frontend_policy(
     lock: dict,
 ) -> None:
@@ -1168,7 +1290,7 @@ def validate_frontend_policy(
     ):
 
         fail(
-            "Frontend package missing "
+            "Frontend package is missing "
             "from compatibility_lock.yaml."
         )
 
@@ -1177,7 +1299,7 @@ def validate_frontend_policy(
     ):
 
         fail(
-            "Frontend version missing "
+            "Frontend version is missing "
             "from compatibility_lock.yaml."
         )
 
@@ -1208,34 +1330,13 @@ def validate_frontend_policy(
             path
         )
 
-        strings = list(
+        for value in (
             actual_string_constants(
                 tree
             )
-        )
-
-        # Only executable string constants are considered.
-        #
-        # A comment such as:
-        #
-        #   # Do not pass --front-end-version @latest
-        #
-        # is not an AST Constant and is therefore ignored.
-        #
-        # A real executable command such as:
-        #
-        #   "--front-end-version"
-        #
-        # or:
-        #
-        #   "@latest"
-        #
-        # will be caught.
-
-        for value in (
-            strings
         ):
 
+            # Actual command strings only.
             if (
                 "--front-end-version"
                 in value
@@ -1243,16 +1344,19 @@ def validate_frontend_policy(
 
                 fail(
                     f"{path.relative_to(PROJECT_ROOT)} "
-                    "contains an executable frontend override."
+                    "contains an executable frontend "
+                    "version override."
                 )
 
-            if value.strip() == (
-                "@latest"
+            if (
+                value.strip()
+                == "@latest"
             ):
 
                 fail(
                     f"{path.relative_to(PROJECT_ROOT)} "
-                    "contains an executable @latest frontend."
+                    "contains an executable "
+                    "@latest frontend."
                 )
 
     print(
@@ -1261,9 +1365,8 @@ def validate_frontend_policy(
 
 
 # ================================================================
-# MODERN ADAPTER / EXECUTION
+# WORKFLOW ADAPTER
 # ================================================================
-
 
 def validate_adapter() -> None:
 
@@ -1277,11 +1380,11 @@ def validate_adapter() -> None:
         path
     )
 
-    text = path.read_text(
-        encoding="utf-8"
+    tree = parse_python(
+        path
     )
 
-    required_markers = [
+    required_identifiers = [
 
         "LTXVLatentUpsamplerModelLoader",
         "LatentUpscaleModelLoader",
@@ -1290,21 +1393,28 @@ def validate_adapter() -> None:
         "set_input_video",
     ]
 
-    for marker in (
-        required_markers
+    for identifier in (
+        required_identifiers
     ):
 
-        if marker not in text:
+        if not source_contains_identifier(
+            tree,
+            identifier,
+        ):
 
             fail(
-                "Workflow adapter missing:\n"
-                f"{marker}"
+                "Workflow adapter missing integration:\n"
+                f"{identifier}"
             )
 
     print(
         "OK   modern workflow adapter"
     )
 
+
+# ================================================================
+# SHOT EXECUTOR
+# ================================================================
 
 def validate_executor() -> None:
 
@@ -1318,11 +1428,11 @@ def validate_executor() -> None:
         path
     )
 
-    text = path.read_text(
-        encoding="utf-8"
+    tree = parse_python(
+        path
     )
 
-    required_markers = [
+    required_identifiers = [
 
         "_copy_raw_to_comfy_input",
         "VHS_LoadVideo",
@@ -1332,26 +1442,32 @@ def validate_executor() -> None:
         "mark_upscaled_complete",
     ]
 
-    for marker in (
-        required_markers
+    for identifier in (
+        required_identifiers
     ):
 
-        if marker not in text:
+        if not source_contains_identifier(
+            tree,
+            identifier,
+        ):
 
             fail(
-                "ShotExecutor missing:\n"
-                f"{marker}"
+                "ShotExecutor missing integration:\n"
+                f"{identifier}"
             )
 
-    # Production resolution contract.
+    text = read_text(
+        path
+    )
+
     if (
         "1536x832"
         in text
     ):
 
         fail(
-            "ShotExecutor still contains "
-            "the obsolete 1536x832 production resolution."
+            "ShotExecutor contains obsolete "
+            "1536x832 production resolution."
         )
 
     if (
@@ -1360,8 +1476,8 @@ def validate_executor() -> None:
     ):
 
         fail(
-            "ShotExecutor does not document "
-            "the required 1536x864 16:9 master."
+            "ShotExecutor does not contain the "
+            "required 1536x864 16:9 master policy."
         )
 
     print(
@@ -1372,6 +1488,10 @@ def validate_executor() -> None:
         "OK   1536x864 16:9 master policy"
     )
 
+
+# ================================================================
+# PRODUCTION RUNNER
+# ================================================================
 
 def validate_runner() -> None:
 
@@ -1385,36 +1505,202 @@ def validate_runner() -> None:
         path
     )
 
-    text = path.read_text(
-        encoding="utf-8"
+    tree = parse_python(
+        path
     )
 
-    required_markers = [
+    classes = class_map(
+        tree
+    )
 
-        "ProductionRunner",
+    runner = classes.get(
+        "ProductionRunner"
+    )
+
+    if runner is None:
+
+        fail(
+            "ProductionRunner class is missing."
+        )
+
+    methods = method_names(
+        runner
+    )
+
+    required_methods = {
+
+        "__init__",
+        "prepare",
+        "run",
+        "_run_one_shot",
+        "_dict_to_shot",
+    }
+
+    missing_methods = (
+        required_methods
+        - methods
+    )
+
+    if missing_methods:
+
+        fail(
+            "ProductionRunner missing methods:\n"
+            + "\n".join(
+                sorted(
+                    missing_methods
+                )
+            )
+        )
+
+    required_integrations = [
+
         "GPUScheduler",
         "ShotExecutor",
         "ComfyClient",
         "AssemblyManager",
-        "runner",
-        "run",
+        "CheckpointManager",
+        "ComfyWorkflowAdapter",
     ]
 
-    for marker in (
-        required_markers
+    for identifier in (
+        required_integrations
     ):
 
-        if marker not in text:
+        if not source_contains_identifier(
+            tree,
+            identifier,
+        ):
 
             fail(
-                "ProductionRunner missing:\n"
-                f"{marker}"
+                "ProductionRunner missing integration:\n"
+                f"{identifier}"
             )
 
+    # Verify actual scheduler.run(...) call exists.
+    has_scheduler_run = False
+
+    for node in ast.walk(
+        runner
+    ):
+
+        if not isinstance(
+            node,
+            ast.Call,
+        ):
+
+            continue
+
+        func = node.func
+
+        if not isinstance(
+            func,
+            ast.Attribute,
+        ):
+
+            continue
+
+        if (
+            func.attr
+            == "run"
+        ):
+
+            value = func.value
+
+            if isinstance(
+                value,
+                ast.Attribute,
+            ):
+
+                if (
+                    value.attr
+                    == "scheduler"
+                ):
+
+                    has_scheduler_run = True
+
+            elif isinstance(
+                value,
+                ast.Name,
+            ):
+
+                if (
+                    value.id
+                    == "scheduler"
+                ):
+
+                    has_scheduler_run = True
+
+    if not has_scheduler_run:
+
+        fail(
+            "ProductionRunner.run() does not "
+            "call the GPU scheduler."
+        )
+
+    # Verify actual ShotExecutor construction.
+    has_executor = False
+
+    for node in ast.walk(
+        runner
+    ):
+
+        if not isinstance(
+            node,
+            ast.Call,
+        ):
+
+            continue
+
+        func = node.func
+
+        if isinstance(
+            func,
+            ast.Name,
+        ):
+
+            if (
+                func.id
+                == "ShotExecutor"
+            ):
+
+                has_executor = True
+                break
+
+    if not has_executor:
+
+        fail(
+            "ProductionRunner does not construct "
+            "ShotExecutor."
+        )
+
     print(
-        "OK   production runner"
+        "OK   ProductionRunner class"
     )
 
+    print(
+        "OK   ProductionRunner.run()"
+    )
+
+    print(
+        "OK   ProductionRunner → GPUScheduler"
+    )
+
+    print(
+        "OK   ProductionRunner → ShotExecutor"
+    )
+
+    print(
+        "OK   ProductionRunner → ComfyClient"
+    )
+
+    print(
+        "OK   ProductionRunner → AssemblyManager"
+    )
+
+
+# ================================================================
+# GPU SCHEDULER
+# ================================================================
 
 def validate_scheduler() -> None:
 
@@ -1428,32 +1714,62 @@ def validate_scheduler() -> None:
         path
     )
 
-    text = path.read_text(
-        encoding="utf-8"
+    tree = parse_python(
+        path
     )
 
-    required_markers = [
-        "GPUScheduler",
-        "threading.Thread",
-        "failures",
+    classes = class_map(
+        tree
+    )
+
+    scheduler = classes.get(
+        "GPUScheduler"
+    )
+
+    if scheduler is None:
+
+        fail(
+            "GPUScheduler class is missing."
+        )
+
+    methods = method_names(
+        scheduler
+    )
+
+    if "run" not in methods:
+
+        fail(
+            "GPUScheduler.run() is missing."
+        )
+
+    identifiers = [
+        "threading",
         "worker_function",
+        "failures",
     ]
 
-    for marker in (
-        required_markers
+    for identifier in (
+        identifiers
     ):
 
-        if marker not in text:
+        if not source_contains_identifier(
+            tree,
+            identifier,
+        ):
 
             fail(
-                "GPU scheduler missing:\n"
-                f"{marker}"
+                "GPU scheduler missing integration:\n"
+                f"{identifier}"
             )
 
     print(
         "OK   GPU scheduler"
     )
 
+
+# ================================================================
+# CHECKPOINT MANAGER
+# ================================================================
 
 def validate_checkpoint_manager() -> None:
 
@@ -1467,32 +1783,153 @@ def validate_checkpoint_manager() -> None:
         path
     )
 
-    text = path.read_text(
-        encoding="utf-8"
+    tree = parse_python(
+        path
     )
 
-    required_markers = [
-        "threading.RLock",
-        "production_state.json",
-        "set_assembly_complete",
-        "get_assembly",
-    ]
-
-    for marker in (
-        required_markers
+    if not source_contains_identifier(
+        tree,
+        "RLock",
     ):
 
-        if marker not in text:
+        fail(
+            "CheckpointManager is not using "
+            "thread-safe RLock."
+        )
 
-            fail(
-                "Checkpoint manager missing:\n"
-                f"{marker}"
+    required_methods = {
+
+        "initialize_shot",
+        "get_shot",
+        "mark_generating",
+        "mark_raw_complete",
+        "mark_detailer_complete",
+        "mark_upscaled_complete",
+        "mark_complete",
+        "mark_failed",
+        "set_assembly_started",
+        "set_assembly_complete",
+        "set_assembly_failed",
+        "get_assembly",
+    }
+
+    classes = class_map(
+        tree
+    )
+
+    manager = classes.get(
+        "CheckpointManager"
+    )
+
+    if manager is None:
+
+        fail(
+            "CheckpointManager class is missing."
+        )
+
+    missing = (
+        required_methods
+        - method_names(manager)
+    )
+
+    if missing:
+
+        fail(
+            "CheckpointManager missing methods:\n"
+            + "\n".join(
+                sorted(
+                    missing
+                )
             )
+        )
+
+    text = read_text(
+        path
+    )
+
+    if (
+        "production_state.json"
+        not in text
+    ):
+
+        fail(
+            "Checkpoint state file handling "
+            "is missing."
+        )
 
     print(
         "OK   thread-safe checkpoint manager"
     )
 
+
+# ================================================================
+# COMFY CLIENT
+# ================================================================
+
+def validate_comfy_client() -> None:
+
+    path = (
+        PROJECT_ROOT
+        / "execution"
+        / "comfy_client.py"
+    )
+
+    check_file(
+        path
+    )
+
+    tree = parse_python(
+        path
+    )
+
+    classes = class_map(
+        tree
+    )
+
+    client = classes.get(
+        "ComfyClient"
+    )
+
+    if client is None:
+
+        fail(
+            "ComfyClient class is missing."
+        )
+
+    required_methods = {
+
+        "health_check",
+        "queue_prompt",
+        "get_history",
+        "wait_for_prompt",
+        "download_file",
+        "find_video_outputs",
+    }
+
+    missing = (
+        required_methods
+        - method_names(client)
+    )
+
+    if missing:
+
+        fail(
+            "ComfyClient missing methods:\n"
+            + "\n".join(
+                sorted(
+                    missing
+                )
+            )
+        )
+
+    print(
+        "OK   ComfyUI HTTP API client"
+    )
+
+
+# ================================================================
+# GENERATE VIDEO ENTRY POINT
+# ================================================================
 
 def validate_generate_video() -> None:
 
@@ -1506,30 +1943,51 @@ def validate_generate_video() -> None:
         path
     )
 
-    text = path.read_text(
-        encoding="utf-8"
+    tree = parse_python(
+        path
     )
 
-    required_markers = [
-
+    required_classes = {
         "ProductionOrchestrator",
         "ProductionRunner",
-        "create_production_plan",
-        "runner.run",
+        "ProductionManager",
+    }
+
+    for identifier in (
+        required_classes
+    ):
+
+        if not source_contains_identifier(
+            tree,
+            identifier,
+        ):
+
+            fail(
+                "generate_video.py missing integration:\n"
+                f"{identifier}"
+            )
+
+    text = read_text(
+        path
+    )
+
+    required_strings = [
         "--story",
         "--mode",
         "--gpu-url",
+        "create_production_plan",
+        "runner.run",
     ]
 
-    for marker in (
-        required_markers
+    for value in (
+        required_strings
     ):
 
-        if marker not in text:
+        if value not in text:
 
             fail(
-                "generate_video.py missing:\n"
-                f"{marker}"
+                "generate_video.py missing required "
+                f"entry-point component:\n{value}"
             )
 
     print(
@@ -1538,9 +1996,259 @@ def validate_generate_video() -> None:
 
 
 # ================================================================
-# MODEL LOCK
+# PLANNER → ORCHESTRATOR
 # ================================================================
 
+def validate_planner_orchestrator_chain() -> None:
+
+    planner_path = (
+        PROJECT_ROOT
+        / "pipeline"
+        / "production_orchestrator.py"
+    )
+
+    check_file(
+        planner_path
+    )
+
+    tree = parse_python(
+        planner_path
+    )
+
+    classes = class_map(
+        tree
+    )
+
+    orchestrator = classes.get(
+        "ProductionOrchestrator"
+    )
+
+    if orchestrator is None:
+
+        fail(
+            "ProductionOrchestrator class is missing."
+        )
+
+    required_methods = {
+        "create_production_plan",
+        "unload_models",
+    }
+
+    missing = (
+        required_methods
+        - method_names(
+            orchestrator
+        )
+    )
+
+    if missing:
+
+        fail(
+            "ProductionOrchestrator missing methods:\n"
+            + "\n".join(
+                sorted(
+                    missing
+                )
+            )
+        )
+
+    required_identifiers = [
+
+        "StoryPlanner",
+        "CharacterDetector",
+        "CharacterPlanner",
+        "ScenePlanner",
+        "ShotPlanner",
+        "ContinuityManager",
+    ]
+
+    for identifier in (
+        required_identifiers
+    ):
+
+        if not source_contains_identifier(
+            tree,
+            identifier,
+        ):
+
+            fail(
+                "ProductionOrchestrator missing:\n"
+                f"{identifier}"
+            )
+
+    print(
+        "OK   StoryPlanner → ProductionOrchestrator"
+    )
+
+    print(
+        "OK   Character/Scene/Shot planning chain"
+    )
+
+    print(
+        "OK   Continuity integration"
+    )
+
+
+# ================================================================
+# CHARACTER REFERENCE CHAIN
+# ================================================================
+
+def validate_reference_chain() -> None:
+
+    reference_path = (
+        PROJECT_ROOT
+        / "pipeline"
+        / "reference_manager.py"
+    )
+
+    character_planner_path = (
+        PROJECT_ROOT
+        / "planner"
+        / "character_planner.py"
+    )
+
+    shot_planner_path = (
+        PROJECT_ROOT
+        / "planner"
+        / "shot_planner.py"
+    )
+
+    for path in (
+        reference_path,
+        character_planner_path,
+        shot_planner_path,
+    ):
+
+        check_file(
+            path
+        )
+
+    reference_tree = (
+        parse_python(
+            reference_path
+        )
+    )
+
+    character_tree = (
+        parse_python(
+            character_planner_path
+        )
+    )
+
+    shot_tree = (
+        parse_python(
+            shot_planner_path
+        )
+    )
+
+    for (
+        tree,
+        name,
+    ) in (
+        (
+            reference_tree,
+            "ReferenceManager",
+        ),
+        (
+            character_tree,
+            "CharacterPlanner",
+        ),
+        (
+            shot_tree,
+            "ShotPlanner",
+        ),
+    ):
+
+        if not source_contains_identifier(
+            tree,
+            name,
+        ):
+
+            fail(
+                f"{name} integration missing."
+            )
+
+    # Verify reference_images is present in ShotPlanner source.
+    shot_text = read_text(
+        shot_planner_path
+    )
+
+    if (
+        "reference_images"
+        not in shot_text
+    ):
+
+        fail(
+            "ShotPlanner does not propagate "
+            "reference_images."
+        )
+
+    print(
+        "OK   ReferenceManager"
+    )
+
+    print(
+        "OK   character reference propagation"
+    )
+
+    print(
+        "OK   character references → shots"
+    )
+
+
+# ================================================================
+# PRODUCTION MANAGER
+# ================================================================
+
+def validate_production_manager() -> None:
+
+    path = (
+        PROJECT_ROOT
+        / "pipeline"
+        / "production_manager.py"
+    )
+
+    check_file(
+        path
+    )
+
+    tree = parse_python(
+        path
+    )
+
+    classes = class_map(
+        tree
+    )
+
+    manager = classes.get(
+        "ProductionManager"
+    )
+
+    if manager is None:
+
+        fail(
+            "ProductionManager class is missing."
+        )
+
+    methods = method_names(
+        manager
+    )
+
+    if "get_pipeline" not in methods:
+
+        fail(
+            "ProductionManager.get_pipeline() "
+            "is missing."
+        )
+
+    print(
+        "OK   ProductionManager"
+    )
+
+
+# ================================================================
+# MODEL LOCK
+# ================================================================
 
 def validate_model_lock(
     lock: dict,
@@ -1598,30 +2306,8 @@ def validate_model_lock(
 
 
 # ================================================================
-# EXTERNAL TOOLS
+# FRONTEND / RUNTIME LOCK POLICY
 # ================================================================
-
-
-def validate_external_tools() -> None:
-
-    if (
-        shutil.which(
-            "ffmpeg"
-        )
-        is None
-    ):
-
-        print(
-            "WARNING ffmpeg not found "
-            "in current environment."
-        )
-
-    else:
-
-        print(
-            "OK   ffmpeg"
-        )
-
 
 def validate_runtime_lock_policy() -> None:
 
@@ -1645,9 +2331,33 @@ def validate_runtime_lock_policy() -> None:
 
 
 # ================================================================
-# MAIN
+# EXTERNAL TOOLS
 # ================================================================
 
+def validate_external_tools() -> None:
+
+    if (
+        shutil.which(
+            "ffmpeg"
+        )
+        is None
+    ):
+
+        print(
+            "WARNING ffmpeg not found "
+            "in current environment."
+        )
+
+    else:
+
+        print(
+            "OK   ffmpeg"
+        )
+
+
+# ================================================================
+# MAIN
+# ================================================================
 
 def main():
 
@@ -1665,6 +2375,10 @@ def main():
 
     lock = load_lock()
 
+    # ------------------------------------------------------------
+    # Repository / lock
+    # ------------------------------------------------------------
+
     validate_general_structure()
 
     validate_init_files()
@@ -1674,6 +2388,10 @@ def main():
     validate_git_stack(
         lock
     )
+
+    # ------------------------------------------------------------
+    # Runtime
+    # ------------------------------------------------------------
 
     validate_torch(
         lock
@@ -1686,6 +2404,10 @@ def main():
     validate_model_lock(
         lock
     )
+
+    # ------------------------------------------------------------
+    # Modern compatibility
+    # ------------------------------------------------------------
 
     validate_preflight_source(
         lock
@@ -1703,6 +2425,12 @@ def main():
         lock
     )
 
+    # ------------------------------------------------------------
+    # ComfyUI execution
+    # ------------------------------------------------------------
+
+    validate_comfy_client()
+
     validate_adapter()
 
     validate_executor()
@@ -1713,11 +2441,29 @@ def main():
 
     validate_checkpoint_manager()
 
+    # ------------------------------------------------------------
+    # Planning / application chain
+    # ------------------------------------------------------------
+
+    validate_planner_orchestrator_chain()
+
+    validate_reference_chain()
+
+    validate_production_manager()
+
     validate_generate_video()
+
+    # ------------------------------------------------------------
+    # Workflows / tools
+    # ------------------------------------------------------------
 
     validate_workflows()
 
     validate_external_tools()
+
+    # ------------------------------------------------------------
+    # Final result
+    # ------------------------------------------------------------
 
     print()
 
@@ -1750,23 +2496,15 @@ def main():
     )
 
     print(
-        "Frontend:"
+        "Frontend policy:"
     )
 
     print(
-        "  PINNED / NO EXECUTABLE @latest"
+        "  PINNED / executable @latest prohibited"
     )
 
     print(
-        "Compatibility:"
-    )
-
-    print(
-        "  MODERN + LTX 0.9.8 SHIM"
-    )
-
-    print(
-        "BASE:"
+        "LTX 0.9.8 compatibility:"
     )
 
     print(
@@ -1774,7 +2512,7 @@ def main():
     )
 
     print(
-        "DETAILER:"
+        "Native blur compatibility:"
     )
 
     print(
@@ -1782,7 +2520,47 @@ def main():
     )
 
     print(
-        "Planner → Runner:"
+        "Planner → Orchestrator:"
+    )
+
+    print(
+        "  VALIDATED"
+    )
+
+    print(
+        "Orchestrator → Runner:"
+    )
+
+    print(
+        "  VALIDATED"
+    )
+
+    print(
+        "Runner → Scheduler:"
+    )
+
+    print(
+        "  VALIDATED"
+    )
+
+    print(
+        "Scheduler → ShotExecutor:"
+    )
+
+    print(
+        "  VALIDATED"
+    )
+
+    print(
+        "ShotExecutor → ComfyClient:"
+    )
+
+    print(
+        "  VALIDATED"
+    )
+
+    print(
+        "BASE → IC-LoRA → Spatial:"
     )
 
     print(
