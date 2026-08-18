@@ -1047,4 +1047,549 @@ def validate_kaggle_wiring() -> None:
     require(
         "compatibility_lock.yaml"
         in bootstrap,
-        "bootstra
+        "bootstrap.py is not lock-driven.",
+    )
+
+    require(
+        "model_paths.yaml"
+        not in bootstrap,
+        "bootstrap.py references obsolete "
+        "model_paths.yaml.",
+    )
+
+    require(
+        "compatibility_lock.yaml"
+        in preflight,
+        "preflight_modern.py is not lock-driven.",
+    )
+
+    require(
+        str(STALE_COMFYUI_PORT)
+        not in tunnel,
+        "start_comfyui_tunnel.py contains stale "
+        "port 8219.",
+    )
+
+    require(
+        str(CANONICAL_COMFYUI_PORT)
+        in tunnel,
+        "start_comfyui_tunnel.py does not use "
+        "canonical port 8188.",
+    )
+
+    print(
+        "OK   Kaggle launcher/bootstrap wiring"
+    )
+
+
+# ======================================================================
+# 11. CPU PREFLIGHT
+# ======================================================================
+
+def validate_cpu_preflight() -> None:
+
+    source = read_text(
+        CPU_PREFLIGHT
+    )
+
+    require(
+        "compatibility_lock.yaml"
+        in source,
+        "cpu_preflight.py is not "
+        "lock-driven.",
+    )
+
+    require(
+        "model_paths.yaml"
+        in source,
+        "cpu_preflight.py must explicitly "
+        "protect against obsolete model_paths.yaml.",
+    )
+
+    require(
+        "runtime_requirements.lock"
+        in source,
+        "cpu_preflight.py must explicitly "
+        "protect against obsolete runtime_requirements.lock.",
+    )
+
+    print(
+        "OK   CPU preflight contract"
+    )
+
+
+# ======================================================================
+# 12. RUNTIME VERIFIER CONTRACT
+# ======================================================================
+
+def validate_live_runtime_verifier() -> None:
+
+    source = read_text(
+        LIVE_RUNTIME
+    )
+
+    required = {
+        "127.0.0.1:8188",
+        "/system_stats",
+        "/object_info",
+        "LTXVBaseSampler",
+        "LTXVConditioning",
+        "STGGuiderAdvanced",
+        "UnetLoaderGGUF",
+        "CLIPLoaderGGUF",
+        "VAELoader",
+        "VHS_VideoCombine",
+        "LatentUpscaleModelLoader",
+        "LTXVLatentUpsamplerModelLoader",
+    }
+
+    for text in required:
+
+        require(
+            text in source,
+            "verify_live_runtime.py missing contract:\n"
+            f"{text}",
+        )
+
+    require(
+        "8219"
+        not in source,
+        "verify_live_runtime.py still contains "
+        "stale port 8219.",
+    )
+
+    print(
+        "OK   live runtime verifier contract"
+    )
+
+
+# ======================================================================
+# 13. GLOBAL PORT CONTRACT
+# ======================================================================
+
+def validate_port_contract() -> None:
+
+    files = (
+        TUNNEL,
+        LIVE_RUNTIME,
+        GENERATE_VIDEO,
+    )
+
+    for path in files:
+
+        source = read_text(
+            path
+        )
+
+        require(
+            str(STALE_COMFYUI_PORT)
+            not in source,
+            "Stale ComfyUI port detected:\n"
+            f"{path}\n"
+            f"Forbidden: {STALE_COMFYUI_PORT}\n"
+            f"Canonical: {CANONICAL_COMFYUI_PORT}",
+        )
+
+    print(
+        "OK   global ComfyUI port contract: 8188"
+    )
+
+
+# ======================================================================
+# 14. LIVE RUNTIME
+# ======================================================================
+
+def http_json(
+    url: str,
+    timeout: float,
+) -> dict[str, Any]:
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+        },
+    )
+
+    try:
+
+        with urllib.request.urlopen(
+            request,
+            timeout=timeout,
+        ) as response:
+
+            payload = response.read()
+
+    except (
+        urllib.error.URLError,
+        urllib.error.HTTPError,
+    ) as error:
+
+        fail(
+            "Live ComfyUI request failed:\n"
+            f"{url}\n"
+            f"{error}"
+        )
+
+    try:
+
+        data = json.loads(
+            payload.decode("utf-8")
+        )
+
+    except json.JSONDecodeError as error:
+
+        fail(
+            "Live ComfyUI returned invalid JSON:\n"
+            f"{url}\n"
+            f"{error}"
+        )
+
+    require(
+        isinstance(data, dict),
+        f"Live response is not an object:\n{url}",
+    )
+
+    return data
+
+
+def validate_live_runtime(
+    url: str,
+) -> None:
+
+    print(
+        f"Checking live ComfyUI: {url}"
+    )
+
+    http_json(
+        f"{url}/system_stats",
+        15,
+    )
+
+    print(
+        "OK   /system_stats"
+    )
+
+    object_info = http_json(
+        f"{url}/object_info",
+        30,
+    )
+
+    required_nodes = {
+        "LTXVBaseSampler",
+        "LTXVConditioning",
+        "STGGuiderAdvanced",
+        "FloatToSigmas",
+        "StringToFloatList",
+        "UnetLoaderGGUF",
+        "CLIPLoaderGGUF",
+        "VAELoader",
+        "VHS_VideoCombine",
+        "VHS_LoadVideo",
+        "LTXVLoopingSampler",
+        "LTXVLatentUpsampler",
+        "LTXVTiledVAEDecode",
+        "LTXVFilmGrain",
+        "LoraLoaderModelOnly",
+        "LatentUpscaleModelLoader",
+    }
+
+    missing = (
+        required_nodes
+        - set(object_info)
+    )
+
+    require(
+        not missing,
+        "Live ComfyUI missing nodes:\n"
+        + "\n".join(
+            sorted(missing)
+        ),
+    )
+
+    print(
+        f"OK   live required nodes: "
+        f"{len(required_nodes)}"
+    )
+
+    require(
+        LEGACY_LATENT_LOADER
+        in object_info,
+        "Legacy LTX latent loader is not "
+        "available in the compatibility runtime.",
+    )
+
+    require(
+        MODERN_LATENT_LOADER
+        in object_info,
+        "Modern LatentUpscaleModelLoader "
+        "is not available.",
+    )
+
+    print(
+        "OK   legacy compatibility node"
+    )
+
+    print(
+        "OK   modern latent upscaler node"
+    )
+
+
+# ======================================================================
+# 15. CUDA
+# ======================================================================
+
+def validate_cuda() -> None:
+
+    try:
+
+        import torch
+
+    except ImportError as error:
+
+        fail(
+            "PyTorch is not importable:\n"
+            f"{error}"
+        )
+
+    require(
+        torch.cuda.is_available(),
+        "CUDA is not available.",
+    )
+
+    device_count = (
+        torch.cuda.device_count()
+    )
+
+    require(
+        device_count > 0,
+        "CUDA reports zero devices.",
+    )
+
+    print(
+        f"OK   CUDA available: "
+        f"{device_count} GPU(s)"
+    )
+
+    for index in range(
+        device_count
+    ):
+
+        print(
+            f"     GPU {index}: "
+            f"{torch.cuda.get_device_name(index)}"
+        )
+
+
+# ======================================================================
+# 16. MAIN
+# ======================================================================
+
+def main() -> None:
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate the complete LTX-13B "
+            "repository and runtime contract."
+        )
+    )
+
+    parser.add_argument(
+        "--require-runtime",
+        action="store_true",
+        help=(
+            "Require a running ComfyUI "
+            "runtime and verify live nodes."
+        ),
+    )
+
+    parser.add_argument(
+        "--require-cuda",
+        action="store_true",
+        help=(
+            "Require CUDA/GPU availability. "
+            "Implies --require-runtime."
+        ),
+    )
+
+    parser.add_argument(
+        "--runtime-url",
+        default=(
+            "http://127.0.0.1:8188"
+        ),
+        help=(
+            "ComfyUI runtime URL. "
+            "Default: http://127.0.0.1:8188"
+        ),
+    )
+
+    args = parser.parse_args()
+
+    if args.require_cuda:
+        args.require_runtime = True
+
+    print()
+    print("=" * 80)
+    print("LTX-13B PROJECT VALIDATION")
+    print("=" * 80)
+
+    print(
+        f"Project root: {PROJECT_ROOT}"
+    )
+
+    print()
+
+    # --------------------------------------------------------------
+    # STATIC VALIDATION
+    # --------------------------------------------------------------
+
+    validate_files()
+
+    validate_python()
+
+    lock = load_lock()
+
+    validate_lock(
+        lock
+    )
+
+    validate_model_path_architecture(
+        lock
+    )
+
+    validate_workflows()
+
+    validate_adapter()
+
+    validate_real_detailer_conversion()
+
+    validate_compatibility_builder()
+
+    validate_production_application()
+
+    validate_kaggle_wiring()
+
+    validate_cpu_preflight()
+
+    validate_live_runtime_verifier()
+
+    validate_port_contract()
+
+    # --------------------------------------------------------------
+    # OPTIONAL LIVE VALIDATION
+    # --------------------------------------------------------------
+
+    if args.require_runtime:
+
+        print()
+        print("=" * 80)
+        print("LIVE COMFYUI VALIDATION")
+        print("=" * 80)
+
+        validate_live_runtime(
+            args.runtime_url.rstrip("/")
+        )
+
+    # --------------------------------------------------------------
+    # OPTIONAL CUDA
+    # --------------------------------------------------------------
+
+    if args.require_cuda:
+
+        print()
+        print("=" * 80)
+        print("CUDA VALIDATION")
+        print("=" * 80)
+
+        validate_cuda()
+
+    # --------------------------------------------------------------
+    # FINAL RESULT
+    # --------------------------------------------------------------
+
+    print()
+    print("=" * 80)
+
+    if args.require_cuda:
+
+        print(
+            "🎉 LTX-13B STATIC + LIVE + CUDA "
+            "VALIDATION PASSED"
+        )
+
+    elif args.require_runtime:
+
+        print(
+            "🎉 LTX-13B STATIC + LIVE "
+            "VALIDATION PASSED"
+        )
+
+    else:
+
+        print(
+            "🎉 LTX-13B STATIC VALIDATION PASSED"
+        )
+
+    print("=" * 80)
+
+    print()
+    print(
+        "Single source of truth:"
+    )
+
+    print(
+        "  kaggle/compatibility_lock.yaml"
+    )
+
+    print()
+    print(
+        "Obsolete configuration:"
+    )
+
+    print(
+        "  kaggle/model_paths.yaml     ❌"
+    )
+
+    print(
+        "  kaggle/runtime_requirements.lock ❌"
+    )
+
+    print()
+    print(
+        "Canonical ComfyUI port:"
+    )
+
+    print(
+        "  8188"
+    )
+
+    if args.require_runtime:
+
+        print()
+        print(
+            "Live ComfyUI:"
+        )
+
+        print(
+            f"  {args.runtime_url}"
+        )
+
+    if args.require_cuda:
+
+        print()
+        print(
+            "GPU:"
+        )
+
+        print(
+            "  CUDA verified"
+        )
+
+    print()
+    print(
+        "NO VIDEO WAS GENERATED BY THIS VALIDATOR."
+    )
+
+
+if __name__ == "__main__":
+    main()
