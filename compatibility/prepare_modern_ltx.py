@@ -6,9 +6,10 @@ import subprocess
 from pathlib import Path
 
 
-LEGACY_LTX_COMMIT = (
-    "ee11be3ce229c3afd5fadf8a1258eb8b84af33b1"
+PROJECT_DEFAULT = (
+    "/kaggle/working/LTX-13B-AI-Video-Model"
 )
+
 
 LTX_REPO = (
     "https://github.com/Lightricks/"
@@ -21,11 +22,112 @@ def run(
     cwd: Path | None = None,
 ) -> None:
 
+    print(
+        "$ "
+        + " ".join(
+            map(
+                str,
+                command,
+            )
+        )
+    )
+
     subprocess.run(
         command,
         cwd=cwd,
         check=True,
     )
+
+
+def load_lock(
+    project: Path,
+):
+
+    lock_file = (
+        project
+        / "kaggle"
+        / "compatibility_lock.yaml"
+    )
+
+    if not lock_file.exists():
+
+        raise FileNotFoundError(
+            "Compatibility lock not found:\n"
+            f"{lock_file}"
+        )
+
+    try:
+
+        import yaml
+
+    except ImportError as error:
+
+        raise RuntimeError(
+            "PyYAML is required to read "
+            "compatibility_lock.yaml."
+        ) from error
+
+    with lock_file.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
+
+        data = yaml.safe_load(
+            file
+        )
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
+        raise RuntimeError(
+            "compatibility_lock.yaml is invalid."
+        )
+
+    return data
+
+
+def get_legacy_commit(
+    lock,
+):
+
+    try:
+
+        commit = (
+            lock[
+                "legacy_ltx_098_compat"
+            ][
+                "commit"
+            ]
+        )
+
+    except KeyError as error:
+
+        raise RuntimeError(
+            "compatibility_lock.yaml is missing "
+            "legacy_ltx_098_compat.commit"
+        ) from error
+
+    if not isinstance(
+        commit,
+        str,
+    ):
+
+        raise RuntimeError(
+            "Legacy LTX commit must be a string."
+        )
+
+    commit = commit.strip()
+
+    if len(commit) != 40:
+
+        raise RuntimeError(
+            "Legacy LTX commit must be a "
+            "40-character SHA."
+        )
+
+    return commit
 
 
 def ensure_repo(
@@ -35,9 +137,15 @@ def ensure_repo(
 
     if (
         path.exists()
-        and not (path / ".git").exists()
+        and not (
+            path
+            / ".git"
+        ).exists()
     ):
-        shutil.rmtree(path)
+
+        shutil.rmtree(
+            path
+        )
 
     if not path.exists():
 
@@ -76,21 +184,25 @@ def ensure_repo(
         cwd=path,
     )
 
-    actual = subprocess.check_output(
-        [
-            "git",
-            "rev-parse",
-            "HEAD",
-        ],
-        cwd=path,
-        text=True,
-    ).strip()
+    actual = (
+        subprocess.check_output(
+            [
+                "git",
+                "rev-parse",
+                "HEAD",
+            ],
+            cwd=path,
+            text=True,
+        )
+        .strip()
+    )
 
     if actual != commit:
+
         raise RuntimeError(
-            f"LTX revision mismatch.\n"
+            "LTX revision mismatch.\n"
             f"Expected: {commit}\n"
-            f"Found: {actual}"
+            f"Found:    {actual}"
         )
 
 
@@ -107,6 +219,7 @@ def patch_blur(
     )
 
     if start < 0:
+
         raise RuntimeError(
             "blur_internal() not found."
         )
@@ -117,110 +230,123 @@ def patch_blur(
     )
 
     if end < 0:
+
         raise RuntimeError(
-            "Could not find end of blur_internal()."
+            "Could not determine end of "
+            "blur_internal()."
         )
 
-    replacement = "\n".join(
-        [
-            "def blur_internal(image, blur_radius):",
-            "    \"\"\"",
-            "    Modern ComfyUI-compatible",
-            "    implementation of the legacy",
-            "    LTX 0.9.8 conditioning blur.",
-            "",
-            "    The sampler calls:",
-            "        blur_internal(image, blur)",
-            "",
-            "    The tested workflow uses blur=1.",
-            "    \"\"\"",
-            "",
-            "    import torch",
-            "    import torch.nn.functional as F",
-            "",
-            "    radius = int(blur_radius)",
-            "",
-            "    if radius <= 0:",
-            "        return image",
-            "",
-            "    if image.ndim != 4:",
-            "        raise ValueError(",
-            "            f\"Expected IMAGE [B,H,W,C], got {tuple(image.shape)}\"",
-            "        )",
-            "",
-            "    sigma = 1.0",
-            "    kernel_size = radius * 2 + 1",
-            "",
-            "    coords = torch.arange(",
-            "        kernel_size,",
-            "        device=image.device,",
-            "        dtype=torch.float32,",
-            "    ) - float(radius)",
-            "",
-            "    kernel_1d = torch.exp(",
-            "        -(coords ** 2)",
-            "        / (2.0 * sigma * sigma)",
-            "    )",
-            "",
-            "    kernel_1d = (",
-            "        kernel_1d",
-            "        / kernel_1d.sum()",
-            "    )",
-            "",
-            "    kernel_2d = (",
-            "        kernel_1d[:, None]",
-            "        * kernel_1d[None, :]",
-            "    )",
-            "",
-            "    channels = image.shape[-1]",
-            "",
-            "    kernel = (",
-            "        kernel_2d",
-            "        .to(",
-            "            device=image.device,",
-            "            dtype=image.dtype,",
-            "        )",
-            "        .repeat(",
-            "            channels,",
-            "            1,",
-            "            1,",
-            "        )",
-            "        .unsqueeze(1)",
-            "    )",
-            "",
-            "    work = image.permute(",
-            "        0,",
-            "        3,",
-            "        1,",
-            "        2,",
-            "    )",
-            "",
-            "    work = F.pad(",
-            "        work,",
-            "        (",
-            "            radius,",
-            "            radius,",
-            "            radius,",
-            "            radius,",
-            "        ),",
-            "        mode=\"reflect\",",
-            "    )",
-            "",
-            "    work = F.conv2d(",
-            "        work,",
-            "        kernel,",
-            "        padding=0,",
-            "        groups=channels,",
-            "    )",
-            "",
-            "    return work.permute(",
-            "        0,",
-            "        2,",
-            "        3,",
-            "        1,",
-            "    )",
-        ]
+    replacement = """
+def blur_internal(image, blur_radius):
+    \"\"\"
+    Modern ComfyUI-compatible
+    implementation of the legacy
+    LTX 0.9.8 conditioning blur.
+
+    The tested production workflow
+    uses blur=1.
+    \"\"\"
+
+    import torch
+    import torch.nn.functional as F
+
+    radius = int(
+        blur_radius
     )
+
+    if radius <= 0:
+
+        return image
+
+    if image.ndim != 4:
+
+        raise ValueError(
+            "Expected IMAGE "
+            "[B,H,W,C], got "
+            f"{tuple(image.shape)}"
+        )
+
+    sigma = 1.0
+
+    kernel_size = (
+        radius * 2 + 1
+    )
+
+    coords = torch.arange(
+        kernel_size,
+        device=image.device,
+        dtype=torch.float32,
+    ) - float(radius)
+
+    kernel_1d = torch.exp(
+        -(coords ** 2)
+        / (
+            2.0
+            * sigma
+            * sigma
+        )
+    )
+
+    kernel_1d = (
+        kernel_1d
+        / kernel_1d.sum()
+    )
+
+    kernel_2d = (
+        kernel_1d[:, None]
+        * kernel_1d[None, :]
+    )
+
+    channels = (
+        image.shape[-1]
+    )
+
+    kernel = (
+        kernel_2d
+        .to(
+            device=image.device,
+            dtype=image.dtype,
+        )
+        .repeat(
+            channels,
+            1,
+            1,
+        )
+        .unsqueeze(1)
+    )
+
+    work = image.permute(
+        0,
+        3,
+        1,
+        2,
+    )
+
+    work = F.pad(
+        work,
+        (
+            radius,
+            radius,
+            radius,
+            radius,
+        ),
+        mode="reflect",
+    )
+
+    work = F.conv2d(
+        work,
+        kernel,
+        padding=0,
+        groups=channels,
+    )
+
+    return work.permute(
+        0,
+        2,
+        3,
+        1,
+    )
+""".lstrip()
 
     patched = (
         text[:start]
@@ -232,8 +358,9 @@ def patch_blur(
         "post_processing.Blur().blur("
         in patched
     ):
+
         raise RuntimeError(
-            "Old Blur().blur() still remains."
+            "Old Blur().blur() call still exists."
         )
 
     guide_file.write_text(
@@ -246,20 +373,41 @@ def write_curated_init(
     target: Path,
 ) -> None:
 
-    init_code = """from .decoder_noise import DecoderNoise
-from .easy_samplers import LTXVBaseSampler
-from .film_grain import LTXVFilmGrain
+    init_code = """
+from .decoder_noise import DecoderNoise
+
+from .easy_samplers import (
+    LTXVBaseSampler,
+)
+
+from .film_grain import (
+    LTXVFilmGrain,
+)
+
 from .latent_upsampler import (
     LTXVLatentUpsampler,
     LTXVLatentUpsamplerModelLoader,
 )
-from .looping_sampler import LTXVLoopingSampler
-from .stg import STGGuiderAdvancedNode
-from .tiled_sampler import LTXVTiledSampler
-from .tiled_vae_decode import LTXVTiledVAEDecode
+
+from .looping_sampler import (
+    LTXVLoopingSampler,
+)
+
+from .stg import (
+    STGGuiderAdvancedNode,
+)
+
+from .tiled_sampler import (
+    LTXVTiledSampler,
+)
+
+from .tiled_vae_decode import (
+    LTXVTiledVAEDecode,
+)
 
 
 NODE_CLASS_MAPPINGS = {
+
     "LTXVBaseSampler":
         LTXVBaseSampler,
 
@@ -299,10 +447,11 @@ __all__ = [
     "NODE_CLASS_MAPPINGS",
     "NODE_DISPLAY_NAME_MAPPINGS",
 ]
-"""
+""".lstrip()
 
     (
-        target / "__init__.py"
+        target
+        / "__init__.py"
     ).write_text(
         init_code,
         encoding="utf-8",
@@ -310,27 +459,49 @@ __all__ = [
 
 
 def build_compat_package(
-    custom_nodes: Path,
-    cache_root: Path,
+    project: Path,
+    lock,
 ) -> Path:
 
-    legacy = (
+    commit = get_legacy_commit(
+        lock
+    )
+
+    custom_nodes = (
+        project
+        / "ComfyUI"
+        / "custom_nodes"
+    )
+
+    cache_root = (
+        project
+        / ".runtime_ltx098"
+    )
+
+    legacy_source = (
         cache_root
         / "ltx098_source"
     )
 
     target = (
         custom_nodes
-        / "LTX098ModernCompat"
+        / lock[
+            "legacy_ltx_098_compat"
+        ][
+            "runtime_package"
+        ]
     )
 
     ensure_repo(
-        legacy,
-        LEGACY_LTX_COMMIT,
+        legacy_source,
+        commit,
     )
 
     if target.exists():
-        shutil.rmtree(target)
+
+        shutil.rmtree(
+            target
+        )
 
     target.parent.mkdir(
         parents=True,
@@ -338,7 +509,7 @@ def build_compat_package(
     )
 
     shutil.copytree(
-        legacy,
+        legacy_source,
         target,
         ignore=shutil.ignore_patterns(
             ".git",
@@ -354,30 +525,36 @@ def build_compat_package(
     )
 
     patch_blur(
-        target / "guide.py"
+        target
+        / "guide.py"
     )
 
     return target
 
 
-if __name__ == "__main__":
+def main():
 
     project = Path(
         os.getenv(
             "LTX_PROJECT_ROOT",
-            "/kaggle/working/LTX-13B-AI-Video-Model",
+            PROJECT_DEFAULT,
         )
     )
 
-    result = build_compat_package(
+    lock = load_lock(
         project
-        / "ComfyUI"
-        / "custom_nodes",
-
-        project
-        / ".runtime_ltx098",
     )
 
+    commit = get_legacy_commit(
+        lock
+    )
+
+    package = build_compat_package(
+        project,
+        lock,
+    )
+
+    print()
     print(
         "=" * 80
     )
@@ -391,15 +568,23 @@ if __name__ == "__main__":
     )
 
     print(
-        "Package:",
-        result,
+        f"Package: {package}"
     )
 
     print(
-        "Legacy commit:",
-        LEGACY_LTX_COMMIT,
+        f"Legacy LTX commit: {commit}"
     )
 
     print(
-        "Blur: native torch"
+        "Blur implementation: native torch"
     )
+
+    print(
+        "Workflow blur: "
+        f"{lock['legacy_ltx_098_compat']['patches']['blur_internal']['workflow_blur']}"
+    )
+
+
+if __name__ == "__main__":
+
+    main()
