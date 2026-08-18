@@ -1,9 +1,21 @@
-# LTX-13B modern production compatibility lock
-# Proven by live Kaggle GPU execution on 2026-08-18.
+# LTX-13B modern production compatibility lock.
+#
+# This file is the SINGLE SOURCE OF TRUTH for:
+# - ComfyUI
+# - frontend package
+# - ComfyUI support packages
+# - custom-node revisions
+# - LTX 0.9.8 compatibility source
+# - model locations
+#
+# The versions below describe the environment that passed
+# the final Kaggle CPU/GPU compatibility tests.
 
 comfyui:
   repository: https://github.com/Comfy-Org/ComfyUI.git
+
   tag: v0.33.1
+
   commit: 72865f4f27eaf5396f8f36370e0a2be3a9a090ee
 
   frontend:
@@ -26,15 +38,23 @@ comfyui:
     package: comfy-aimdo
     version: 0.4.13
 
+
 python_runtime:
+
+  # These are provided by the Kaggle GPU image
+  # and are verified, not forcibly reinstalled.
   torch: 2.10.0+cu128
   torchvision: 0.25.0+cu128
+
+  # These are installed/verified by bootstrap.
   torchsde: 0.2.6
   spandrel: 0.4.2
   av: 18.1.0
   gguf: 0.19.0
 
+
 custom_nodes:
+
   ComfyUI-LTXVideo:
     repository: https://github.com/Lightricks/ComfyUI-LTXVideo.git
     commit: ac4d99839020b983e956a8ab67ec38aec1b6e65a
@@ -51,36 +71,59 @@ custom_nodes:
     repository: https://github.com/city96/ComfyUI-GGUF.git
     commit: 6ea2651e7df66d7585f6ffee804b20e92fb38b8a
 
+
 legacy_ltx_098_compat:
+
   repository: https://github.com/Lightricks/ComfyUI-LTXVideo.git
+
   commit: ee11be3ce229c3afd5fadf8a1258eb8b84af33b1
 
   runtime_package: LTX098ModernCompat
 
   required_nodes:
     - LTXVBaseSampler
+    - LTXVConditioning
+    - LTXVFilmGrain
+    - LTXVLatentUpsampler
+    - LTXVLatentUpsamplerModelLoader
     - LTXVLoopingSampler
     - LTXVTiledSampler
     - LTXVTiledVAEDecode
-    - LTXVLatentUpsampler
-    - LTXVLatentUpsamplerModelLoader
-    - LTXVFilmGrain
     - STGGuiderAdvanced
     - Set VAE Decoder Noise
 
   patches:
+
     blur_internal:
       signature: "blur_internal(image, blur_radius)"
       implementation: "native torch Gaussian blur"
       workflow_blur: 1
 
+    spatial_loader:
+      legacy: LTXVLatentUpsamplerModelLoader
+      modern: LatentUpscaleModelLoader
+      modern_input_type: LATENT_UPSCALE_MODEL
+
+
 detailer_compat:
-  legacy_loader: LTXVLatentUpsamplerModelLoader
-  modern_loader: LatentUpscaleModelLoader
-  output_type: LATENT_UPSCALE_MODEL
-  model_directory: models/latent_upscale_models
+
+  legacy_loader:
+    LTXVLatentUpsamplerModelLoader
+
+  modern_loader:
+    LatentUpscaleModelLoader
+
+  modern_model_directory:
+    models/latent_upscale_models
+
+  spatial_upsample: true
+  temporal_upsample: false
+
+  ic_lora_strength: 1.5
+
 
 models:
+
   ltx_q4:
     dataset: /kaggle/input/datasets/shihoos/ltx13b-q4
     filename: LTXV-13B-0.9.8-distilled-Q4_K_M.gguf
@@ -106,23 +149,28 @@ models:
     filename: ltxv-spatial-upscaler-0.9.8.safetensors
     target: models/latent_upscale_models/ltxv-spatial-upscaler-0.9.8.safetensors
 
+
 validation:
+
   base:
     frames: 97
     fps: 24
     duration_seconds: 4.041667
-    output_resolution: 768x416
+    output_resolution: 768x432
+    blur: 1
 
   detailer:
     frames: 97
     fps: 24
-    duration_seconds: 4.041667
-    output_resolution: 1536x832
+    spatial_upsample: 2
+    temporal_upsample: false
 
-  timing:
+  benchmark:
     old_stack_base_seconds: 495
     modern_stack_base_seconds: 303
+
     old_stack_detailer_seconds: 1140
     modern_stack_detailer_seconds: 945
+
     old_stack_total_seconds: 1635
     modern_stack_total_seconds: 1248
