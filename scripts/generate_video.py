@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 
 from pathlib import Path
@@ -15,23 +14,22 @@ PROJECT_ROOT = (
 )
 
 if str(PROJECT_ROOT) not in sys.path:
-
     sys.path.insert(
         0,
         str(PROJECT_ROOT),
     )
 
 
-from pipeline.production_manager import (
-    ProductionManager,
+from execution.production_runner import (
+    ProductionRunner,
 )
 
 from pipeline.production_orchestrator import (
     ProductionOrchestrator,
 )
 
-from execution.production_runner import (
-    ProductionRunner,
+from pipeline.production_manager import (
+    ProductionManager,
 )
 
 
@@ -51,21 +49,17 @@ DETAILER_WORKFLOW = (
 
 
 def parse_args():
-
     parser = argparse.ArgumentParser(
         description=(
-            "Generate an LTX-13B video from "
-            "a story using the existing planner "
-            "and production execution pipeline."
+            "Run the complete LTX-13B production pipeline:"
+            " planning → BASE → IC-LoRA/spatial detailer → assembly."
         )
     )
 
     parser.add_argument(
         "--story",
         required=True,
-        help=(
-            "Story or generation request."
-        ),
+        help="Story or generation request.",
     )
 
     parser.add_argument(
@@ -76,9 +70,7 @@ def parse_args():
             "preserve_user_story",
             "expand_user_story",
         ],
-        help=(
-            "Story planning mode."
-        ),
+        help="Story planning mode.",
     )
 
     parser.add_argument(
@@ -87,8 +79,7 @@ def parse_args():
         required=True,
         metavar="ID=URL",
         help=(
-            "ComfyUI worker URL. "
-            "Repeat for multiple GPUs. "
+            "ComfyUI worker URL. Repeat for multiple GPUs. "
             "Example: "
             "--gpu-url 0=http://127.0.0.1:8219"
         ),
@@ -98,10 +89,7 @@ def parse_args():
         "--output-json",
         type=Path,
         default=None,
-        help=(
-            "Optional path to save the "
-            "final generation result metadata."
-        ),
+        help="Optional path for generation metadata.",
     )
 
     return parser.parse_args()
@@ -111,45 +99,32 @@ def parse_gpu_urls(
     values: list[str],
 ) -> dict[int, str]:
 
-    result = {}
+    result: dict[int, str] = {}
 
     for value in values:
 
         if "=" not in value:
 
             raise ValueError(
-                "GPU URL must use "
-                "ID=URL format:\n"
+                "GPU URL must use ID=URL format:\n"
                 f"{value}"
             )
 
-        gpu_text, url = (
-            value.split(
-                "=",
-                1,
-            )
+        gpu_text, url = value.split(
+            "=",
+            1,
         )
 
-        gpu_text = (
-            gpu_text.strip()
-        )
-
-        url = (
-            url.strip()
-            .rstrip("/")
-        )
+        gpu_text = gpu_text.strip()
+        url = url.strip().rstrip("/")
 
         try:
-
-            gpu_id = int(
-                gpu_text
-            )
+            gpu_id = int(gpu_text)
 
         except ValueError as error:
 
             raise ValueError(
-                "GPU ID must be an integer:\n"
-                f"{gpu_text}"
+                f"GPU ID must be an integer: {gpu_text}"
             ) from error
 
         if gpu_id < 0:
@@ -166,27 +141,22 @@ def parse_gpu_urls(
         ):
 
             raise ValueError(
-                "GPU URL must begin with "
-                "http:// or https://:\n"
+                "GPU URL must begin with http:// or https://:\n"
                 f"{url}"
             )
 
         if gpu_id in result:
 
             raise ValueError(
-                f"GPU ID {gpu_id} "
-                "was specified more than once."
+                f"GPU ID {gpu_id} was specified more than once."
             )
 
-        result[
-            gpu_id
-        ] = url
+        result[gpu_id] = url
 
     if not result:
 
         raise ValueError(
-            "At least one --gpu-url "
-            "is required."
+            "At least one --gpu-url is required."
         )
 
     return result
@@ -215,20 +185,16 @@ def main():
 
     validate_environment()
 
-    gpu_urls = (
-        parse_gpu_urls(
-            args.gpu_url
-        )
+    gpu_urls = parse_gpu_urls(
+        args.gpu_url
     )
 
     print(
         "=" * 80
     )
-
     print(
-        "LTX-13B PRODUCTION GENERATION"
+        "LTX-13B COMPLETE PRODUCTION PIPELINE"
     )
-
     print(
         "=" * 80
     )
@@ -245,10 +211,7 @@ def main():
         "GPU workers:"
     )
 
-    for (
-        gpu_id,
-        url,
-    ) in sorted(
+    for gpu_id, url in sorted(
         gpu_urls.items()
     ):
 
@@ -256,27 +219,29 @@ def main():
             f"  GPU {gpu_id}: {url}"
         )
 
+    # ---------------------------------------------------------
+    # 1. PLANNING
+    # ---------------------------------------------------------
+
     print()
     print(
         "=" * 80
     )
-
     print(
         "STEP 1 — PRODUCTION PLANNING"
     )
-
     print(
         "=" * 80
     )
 
-    planner = (
+    orchestrator = (
         ProductionOrchestrator()
     )
 
     try:
 
         production_plan = (
-            planner.create_production_plan(
+            orchestrator.create_production_plan(
                 mode=args.mode,
                 user_input=args.story,
             )
@@ -284,18 +249,36 @@ def main():
 
     finally:
 
-        planner.unload_models()
+        orchestrator.unload_models()
+
+    if not isinstance(
+        production_plan,
+        dict,
+    ):
+
+        raise RuntimeError(
+            "ProductionOrchestrator returned "
+            "an invalid production plan."
+        )
 
     shots = production_plan.get(
-        "shots",
-        [],
+        "shots"
     )
+
+    if not isinstance(
+        shots,
+        list,
+    ):
+
+        raise RuntimeError(
+            "Production plan does not contain "
+            "a valid shots list."
+        )
 
     if not shots:
 
         raise RuntimeError(
-            "Production planner returned "
-            "zero shots."
+            "Production planner returned zero shots."
         )
 
     print(
@@ -304,19 +287,23 @@ def main():
     )
 
     print(
-        f"Production plan: "
-        f"{production_plan.get('production_plan_path')}"
+        "Plan:",
+        production_plan.get(
+            "production_plan_path"
+        ),
     )
+
+    # ---------------------------------------------------------
+    # 2. PIPELINE CONFIGURATION
+    # ---------------------------------------------------------
 
     print()
     print(
         "=" * 80
     )
-
     print(
-        "STEP 2 — EXECUTION"
+        "STEP 2 — PIPELINE CONFIGURATION"
     )
-
     print(
         "=" * 80
     )
@@ -329,75 +316,75 @@ def main():
         "Configured pipeline:"
     )
 
-    for stage in (
-        manager.get_pipeline()
-    ):
+    for stage in manager.get_pipeline():
 
         print(
             f"  → {stage}"
         )
 
+    # ---------------------------------------------------------
+    # 3. EXECUTION
+    # ---------------------------------------------------------
+
     print()
+    print(
+        "=" * 80
+    )
+    print(
+        "STEP 3 — GPU EXECUTION"
+    )
+    print(
+        "=" * 80
+    )
 
     runner = (
         ProductionRunner(
-            project_root=(
-                PROJECT_ROOT
-            ),
-
-            gpu_urls=(
-                gpu_urls
-            ),
-
-            workflow_path=(
-                BASE_WORKFLOW
-            ),
-
+            project_root=PROJECT_ROOT,
+            gpu_urls=gpu_urls,
+            workflow_path=BASE_WORKFLOW,
             detailer_workflow_path=(
                 DETAILER_WORKFLOW
             ),
         )
     )
 
-    final_video = (
-        runner.run(
-            production_plan
-        )
+    final_video = runner.run(
+        production_plan
     )
 
+    if not final_video.exists():
+
+        raise RuntimeError(
+            "ProductionRunner reported success "
+            "but the final video does not exist:\n"
+            f"{final_video}"
+        )
+
+    # ---------------------------------------------------------
+    # 4. RESULT
+    # ---------------------------------------------------------
+
     result = {
-
-        "status":
-            "completed",
-
-        "final_video":
-            str(
-                final_video
-            ),
-
-        "production_plan":
+        "status": "completed",
+        "final_video": str(
+            final_video
+        ),
+        "production_plan": (
             production_plan.get(
                 "production_plan_path"
-            ),
-
-        "shot_count":
-            len(
-                shots
-            ),
-
-        "gpu_workers":
-            gpu_urls,
-
-        "story_mode":
-            args.mode,
+            )
+        ),
+        "shot_count": len(
+            shots
+        ),
+        "gpu_workers": gpu_urls,
+        "story_mode": args.mode,
     }
 
     if args.output_json is not None:
 
-        output_path = (
-            Path(
-                args.output_json
-            )
+        output_path = Path(
+            args.output_json
         )
 
         output_path.parent.mkdir(
@@ -415,19 +402,16 @@ def main():
         )
 
         print(
-            f"Result metadata: "
-            f"{output_path}"
+            f"Metadata: {output_path}"
         )
 
     print()
     print(
         "=" * 80
     )
-
     print(
         "🎉 PRODUCTION COMPLETE"
     )
-
     print(
         "=" * 80
     )
