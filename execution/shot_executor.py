@@ -358,7 +358,7 @@ class ShotExecutor:
         #    ↓
         # spatial upscale 2x
         #    ↓
-        # 1536x832 master
+        # 1536x864 master
         # ----------------------------------------------------
 
         self.detailer_workflow_adapter.set_filename_prefix(
