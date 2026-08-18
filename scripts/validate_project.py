@@ -68,7 +68,6 @@ import argparse
 import ast
 import importlib
 import json
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -551,8 +550,7 @@ def validate_lock(
         and all(
             character
             in "0123456789abcdef"
-            for character
-            in commit.lower()
+            for character in commit.lower()
         ),
         "ComfyUI commit must be "
         "a 40-character hexadecimal SHA.",
@@ -1233,6 +1231,17 @@ def validate_kaggle_wiring() -> None:
 
     # ------------------------------------------------------------------------
     # launch.py
+    #
+    # launch.py is the actual startup orchestrator:
+    #
+    #     preflight_modern.py
+    #             ↓
+    #         bootstrap.py
+    #             ↓
+    #     start_comfyui_tunnel.py
+    #
+    # start_comfyui.py is only a compatibility wrapper into launch.py.
+    # Therefore the wrapper itself must NOT be required to contain 8188.
     # ------------------------------------------------------------------------
 
     for name in (
@@ -1246,6 +1255,34 @@ def validate_kaggle_wiring() -> None:
             "launch.py is not wired to:\n"
             f"{name}",
         )
+
+    # ------------------------------------------------------------------------
+    # start_comfyui.py wrapper
+    # ------------------------------------------------------------------------
+
+    require(
+        "launch.py"
+        in start_comfyui,
+        "start_comfyui.py is not "
+        "wired to launch.py.",
+    )
+
+    require(
+        str(
+            STALE_COMFYUI_PORT
+        )
+        not in start_comfyui,
+        "start_comfyui.py contains "
+        "stale port 8219.",
+    )
+
+    # IMPORTANT:
+    #
+    # Do NOT check for 8188 in start_comfyui.py.
+    #
+    # The wrapper delegates to launch.py.
+    # The canonical port belongs to the actual
+    # ComfyUI launcher: start_comfyui_tunnel.py.
 
     # ------------------------------------------------------------------------
     # bootstrap.py
@@ -1298,30 +1335,20 @@ def validate_kaggle_wiring() -> None:
         "not use canonical port 8188.",
     )
 
-    # ------------------------------------------------------------------------
-    # start_comfyui.py
-    # ------------------------------------------------------------------------
-
-    require(
-        str(
-            CANONICAL_COMFYUI_PORT
-        )
-        in start_comfyui,
-        "start_comfyui.py does not "
-        "reference canonical port 8188.",
-    )
-
-    require(
-        str(
-            STALE_COMFYUI_PORT
-        )
-        not in start_comfyui,
-        "start_comfyui.py contains "
-        "stale port 8219.",
+    print(
+        "OK   Kaggle launcher/bootstrap wiring"
     )
 
     print(
-        "OK   Kaggle launcher/bootstrap wiring"
+        "OK   start_comfyui.py -> launch.py wrapper"
+    )
+
+    print(
+        "OK   launch.py -> preflight/bootstrap/tunnel"
+    )
+
+    print(
+        "OK   tunnel -> canonical ComfyUI port 8188"
     )
 
 
