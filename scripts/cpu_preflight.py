@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
+
 """
-LTX-13B CPU PREFLIGHT
+LTX-13B CPU / REPOSITORY PREFLIGHT
 
-Runs repository-level checks without:
+This validation is intentionally CPU-only.
 
-- installing runtime packages
-- starting ComfyUI
-- loading models
-- requiring CUDA
-- consuming GPU
+It does NOT:
 
-This script validates:
+- install packages
+- start ComfyUI
+- load models
+- require CUDA
+- require GPU
+- require Kaggle dataset mounts
 
-1. Project file structure
-2. Python AST syntax
-3. Python package structure
-4. Internal project import graph
-5. BASE workflow source structure
-6. DETAILER workflow source structure
-7. ComfyWorkflowAdapter structure
-8. DETAILER source -> API conversion
-9. Legacy -> modern latent loader conversion
-10. Core pipeline class contracts
+It validates the repository architecture before the
+GPU/runtime bootstrap is allowed to modify anything.
+
+Single source of truth:
+
+    kaggle/compatibility_lock.yaml
+
+The obsolete files below MUST NOT exist:
+
+    kaggle/model_paths.yaml
+    kaggle/runtime_requirements.lock
 """
 
 from __future__ import annotations
@@ -32,52 +35,70 @@ import sys
 from pathlib import Path
 
 
-# =====================================================================
-# PATHS
-# =====================================================================
-
 ROOT = Path(__file__).resolve().parents[1]
 
-PLANNER = ROOT / "planner"
-PIPELINE = ROOT / "pipeline"
-EXECUTION = ROOT / "execution"
-SCHEDULER = ROOT / "scheduler"
-SCHEMAS = ROOT / "schemas"
-KAGGLE = ROOT / "kaggle"
-COMPATIBILITY = ROOT / "compatibility"
-SCRIPTS = ROOT / "scripts"
-WORKFLOWS = ROOT / "workflows"
+LOCK_FILE = ROOT / "kaggle" / "compatibility_lock.yaml"
 
 BASE_WORKFLOW = (
-    WORKFLOWS
+    ROOT
+    / "workflows"
     / "baseline"
     / "ltxv-13b-dist-i2v-base.json"
 )
 
 DETAILER_WORKFLOW = (
-    WORKFLOWS
+    ROOT
+    / "workflows"
     / "detailer"
     / "ltxv-13b-098-ic-lora-upscale.json"
 )
 
+ADAPTER = (
+    ROOT
+    / "execution"
+    / "comfy_workflow_adapter.py"
+)
 
-# =====================================================================
-# HELPERS
-# =====================================================================
+COMPATIBILITY_BUILDER = (
+    ROOT
+    / "compatibility"
+    / "prepare_modern_ltx.py"
+)
+
+GENERATE_VIDEO = (
+    ROOT
+    / "scripts"
+    / "generate_video.py"
+)
+
+VALIDATOR = (
+    ROOT
+    / "scripts"
+    / "validate_project.py"
+)
+
+LIVE_RUNTIME = (
+    ROOT
+    / "kaggle"
+    / "verify_live_runtime.py"
+)
+
+OBSOLETE_FILES = {
+    ROOT / "kaggle" / "model_paths.yaml",
+    ROOT / "kaggle" / "runtime_requirements.lock",
+}
+
 
 def fail(message: str) -> None:
     raise RuntimeError(message)
 
 
-def require(
-    condition: bool,
-    message: str,
-) -> None:
+def require(condition: bool, message: str) -> None:
     if not condition:
         fail(message)
 
 
-def read(path: Path) -> str:
+def read_text(path: Path) -> str:
     require(
         path.is_file(),
         f"Required file missing:\n{path}",
@@ -88,335 +109,321 @@ def read(path: Path) -> str:
     )
 
 
-def parse(path: Path) -> ast.Module:
-    source = read(path)
+def parse_python(path: Path) -> ast.Module:
+    source = read_text(path)
 
     try:
         return ast.parse(
             source,
             filename=str(path),
         )
-
     except SyntaxError as error:
         fail(
             "Python syntax error:\n"
             f"{path}\n"
-            f"Line {error.lineno}: "
-            f"{error.msg}"
+            f"Line {error.lineno}: {error.msg}"
         )
 
 
-def classes(
-    module: ast.Module,
-) -> dict[str, ast.ClassDef]:
+def parse_json(path: Path) -> dict:
+    try:
+        data = json.loads(
+            read_text(path)
+        )
+    except json.JSONDecodeError as error:
+        fail(
+            "Invalid JSON:\n"
+            f"{path}\n"
+            f"{error}"
+        )
 
-    result: dict[str, ast.ClassDef] = {}
+    require(
+        isinstance(data, dict),
+        f"JSON root must be an object:\n{path}",
+    )
 
-    for node in module.body:
-        if isinstance(
-            node,
-            ast.ClassDef,
-        ):
-            result[node.name] = node
-
-    return result
-
-
-def methods(
-    class_node: ast.ClassDef,
-) -> set[str]:
-
-    result: set[str] = set()
-
-    for node in class_node.body:
-        if isinstance(
-            node,
-            (
-                ast.FunctionDef,
-                ast.AsyncFunctionDef,
-            ),
-        ):
-            result.add(node.name)
-
-    return result
+    return data
 
 
 def python_files() -> list[Path]:
-
-    files: list[Path] = []
+    result = []
 
     for path in ROOT.rglob("*.py"):
 
         relative = path.relative_to(ROOT)
 
-        if "__pycache__" in relative.parts:
-            continue
-
         if ".git" in relative.parts:
             continue
 
-        files.append(path)
+        if "ComfyUI" in relative.parts:
+            continue
 
-    return sorted(files)
+        if ".runtime_ltx098" in relative.parts:
+            continue
+
+        if "__pycache__" in relative.parts:
+            continue
+
+        result.append(path)
+
+    return sorted(result)
 
 
-# =====================================================================
-# 1. PROJECT FILE STRUCTURE
-# =====================================================================
+def node_types(workflow: dict) -> set[str]:
+    nodes = workflow.get("nodes", [])
 
-def check_project_files() -> None:
+    require(
+        isinstance(nodes, list),
+        "Workflow 'nodes' must be a list.",
+    )
 
-    required_files = [
-        PLANNER / "config.py",
-        PLANNER / "qwen_loader.py",
-        PLANNER / "story_planner.py",
-        PLANNER / "character_detector.py",
-        PLANNER / "character_planner.py",
-        PLANNER / "scene_planner.py",
-        PLANNER / "shot_planner.py",
+    return {
+        node.get("type")
+        for node in nodes
+        if isinstance(node, dict)
+        and node.get("type")
+    }
 
-        PIPELINE / "continuity_manager.py",
-        PIPELINE / "modes.py",
-        PIPELINE / "production_manager.py",
-        PIPELINE / "production_orchestrator.py",
-        PIPELINE / "reference_manager.py",
 
-        EXECUTION / "checkpoint_manager.py",
-        EXECUTION / "comfy_client.py",
-        EXECUTION / "comfy_workflow_adapter.py",
-        EXECUTION / "shot_executor.py",
-        EXECUTION / "assembly_manager.py",
-        EXECUTION / "production_runner.py",
+# ============================================================
+# 1. FILE STRUCTURE
+# ============================================================
 
-        SCHEDULER / "gpu_scheduler.py",
-        SCHEDULER / "shot_queue.py",
+def check_files() -> None:
 
-        SCHEMAS / "character.py",
-        SCHEMAS / "scene.py",
-        SCHEMAS / "shot.py",
-        SCHEMAS / "parser.py",
+    required = [
+        "planner/config.py",
+        "planner/qwen_loader.py",
+        "planner/story_planner.py",
+        "planner/character_detector.py",
+        "planner/character_planner.py",
+        "planner/scene_planner.py",
+        "planner/shot_planner.py",
 
-        KAGGLE / "bootstrap.py",
-        KAGGLE / "config.py",
-        KAGGLE / "launch.py",
-        KAGGLE / "model_paths.yaml",
-        KAGGLE / "preflight_modern.py",
-        KAGGLE / "start_comfyui.py",
-        KAGGLE / "start_comfyui_tunnel.py",
+        "pipeline/__init__.py",
+        "pipeline/continuity_manager.py",
+        "pipeline/modes.py",
+        "pipeline/production_manager.py",
+        "pipeline/production_orchestrator.py",
+        "pipeline/reference_manager.py",
 
-        COMPATIBILITY / "prepare_modern_ltx.py",
+        "execution/__init__.py",
+        "execution/checkpoint_manager.py",
+        "execution/comfy_client.py",
+        "execution/comfy_workflow_adapter.py",
+        "execution/shot_executor.py",
+        "execution/assembly_manager.py",
+        "execution/production_runner.py",
 
-        SCRIPTS / "generate_video.py",
+        "scheduler/__init__.py",
+        "scheduler/gpu_scheduler.py",
+        "scheduler/shot_queue.py",
 
-        BASE_WORKFLOW,
-        DETAILER_WORKFLOW,
+        "schemas/__init__.py",
+        "schemas/character.py",
+        "schemas/scene.py",
+        "schemas/shot.py",
+        "schemas/parser.py",
+
+        "kaggle/compatibility_lock.yaml",
+        "kaggle/bootstrap.py",
+        "kaggle/config.py",
+        "kaggle/launch.py",
+        "kaggle/preflight_modern.py",
+        "kaggle/start_comfyui.py",
+        "kaggle/start_comfyui_tunnel.py",
+        "kaggle/verify_live_runtime.py",
+
+        "compatibility/prepare_modern_ltx.py",
+
+        "scripts/cpu_preflight.py",
+        "scripts/generate_video.py",
+        "scripts/validate_project.py",
+
+        "workflows/baseline/ltxv-13b-dist-i2v-base.json",
+        "workflows/detailer/ltxv-13b-098-ic-lora-upscale.json",
     ]
 
-    for path in required_files:
+    for relative in required:
+
+        path = ROOT / relative
+
         require(
             path.is_file(),
-            f"Required project file missing:\n{path}",
+            f"Required file missing:\n{path}",
+        )
+
+    for obsolete in OBSOLETE_FILES:
+
+        require(
+            not obsolete.exists(),
+            "Obsolete configuration still exists:\n"
+            f"{obsolete}\n\n"
+            "Do NOT recreate this file. "
+            "compatibility_lock.yaml is the single source of truth.",
         )
 
     print(
-        f"OK   project files: "
-        f"{len(required_files)}"
+        f"OK   repository files: {len(required)}"
     )
 
 
-# =====================================================================
-# 2. PYTHON AST COMPILATION
-# =====================================================================
+# ============================================================
+# 2. PYTHON SYNTAX
+# ============================================================
 
-def check_python_ast() -> None:
+def check_python_syntax() -> None:
 
     files = python_files()
 
     for path in files:
-        parse(path)
+        parse_python(path)
 
     print(
-        f"OK   Python AST compilation: "
-        f"{len(files)} files"
+        f"OK   Python AST syntax: {len(files)} files"
     )
 
 
-# =====================================================================
-# 3. PACKAGE STRUCTURE
-# =====================================================================
+# ============================================================
+# 3. LOCK FILE
+# ============================================================
 
-def check_packages() -> None:
-
-    packages = [
-        EXECUTION,
-        PIPELINE,
-        PLANNER,
-        SCHEMAS,
-        SCHEDULER,
-    ]
-
-    for package in packages:
-
-        init_file = (
-            package
-            / "__init__.py"
-        )
-
-        require(
-            init_file.is_file(),
-            "Package __init__.py missing:\n"
-            f"{init_file}",
-        )
-
-    print(
-        "OK   package __init__.py files"
-    )
-
-
-# =====================================================================
-# 4. PROJECT IMPORT GRAPH
-# =====================================================================
-
-def check_import_graph() -> None:
-
-    modules = [
-        "planner.config",
-        "planner.qwen_loader",
-        "planner.story_planner",
-        "planner.character_detector",
-        "planner.character_planner",
-        "planner.scene_planner",
-        "planner.shot_planner",
-
-        "pipeline.continuity_manager",
-        "pipeline.modes",
-        "pipeline.production_manager",
-        "pipeline.production_orchestrator",
-        "pipeline.reference_manager",
-
-        "execution.checkpoint_manager",
-        "execution.comfy_client",
-        "execution.comfy_workflow_adapter",
-        "execution.shot_executor",
-        "execution.assembly_manager",
-        "execution.production_runner",
-
-        "scheduler.gpu_scheduler",
-        "scheduler.shot_queue",
-
-        "schemas.character",
-        "schemas.scene",
-        "schemas.shot",
-        "schemas.parser",
-    ]
-
-    previous_path = list(sys.path)
+def load_lock() -> dict:
 
     try:
+        import yaml
+    except ImportError as error:
+        fail(
+            "PyYAML is required for CPU preflight:\n"
+            f"{error}"
+        )
 
-        project_path = str(ROOT)
+    try:
+        data = yaml.safe_load(
+            read_text(LOCK_FILE)
+        )
+    except Exception as error:
+        fail(
+            "Could not parse compatibility_lock.yaml:\n"
+            f"{error}"
+        )
 
-        if project_path not in sys.path:
-            sys.path.insert(
-                0,
-                project_path,
-            )
+    require(
+        isinstance(data, dict),
+        "compatibility_lock.yaml must contain a mapping.",
+    )
 
-        for module_name in modules:
+    return data
 
-            parts = module_name.split(".")
 
-            relative = (
-                Path(*parts)
-                .with_suffix(".py")
-            )
+def check_lock(lock: dict) -> None:
 
-            module_path = (
-                ROOT
-                / relative
-            )
+    required_sections = {
+        "comfyui",
+        "python_runtime",
+        "custom_nodes",
+        "legacy_ltx_098_compat",
+        "detailer_compat",
+        "models",
+        "validation",
+    }
+
+    missing = required_sections - set(lock)
+
+    require(
+        not missing,
+        "compatibility_lock.yaml missing sections:\n"
+        + "\n".join(sorted(missing)),
+    )
+
+    comfy = lock["comfyui"]
+    models = lock["models"]
+    custom_nodes = lock["custom_nodes"]
+
+    require(
+        isinstance(comfy, dict),
+        "lock.comfyui must be a mapping.",
+    )
+
+    require(
+        isinstance(models, dict),
+        "lock.models must be a mapping.",
+    )
+
+    require(
+        isinstance(custom_nodes, dict),
+        "lock.custom_nodes must be a mapping.",
+    )
+
+    commit = str(
+        comfy.get("commit", "")
+    )
+
+    require(
+        len(commit) == 40
+        and all(
+            character in "0123456789abcdef"
+            for character in commit.lower()
+        ),
+        "ComfyUI lock commit must be a 40-character SHA.",
+    )
+
+    required_models = {
+        "ltx_q4",
+        "t5_q4",
+        "vae",
+        "ic_lora",
+        "spatial_upscaler",
+    }
+
+    missing_models = (
+        required_models
+        - set(models)
+    )
+
+    require(
+        not missing_models,
+        "compatibility_lock.yaml missing models:\n"
+        + "\n".join(sorted(missing_models)),
+    )
+
+    for name in required_models:
+
+        spec = models[name]
+
+        require(
+            isinstance(spec, dict),
+            f"models.{name} must be a mapping.",
+        )
+
+        for key in (
+            "dataset",
+            "filename",
+            "target",
+        ):
 
             require(
-                module_path.is_file(),
-                "Import graph module missing:\n"
-                f"{module_name}\n"
-                f"{module_path}",
+                isinstance(spec.get(key), str)
+                and spec[key].strip(),
+                f"models.{name}.{key} is missing.",
             )
 
-            parse(module_path)
-
-    finally:
-        sys.path[:] = previous_path
-
     print(
-        f"OK   project import graph: "
-        f"{len(modules)} modules"
+        "OK   compatibility lock"
     )
 
 
-# =====================================================================
-# 5. WORKFLOW SOURCE VALIDATION
-# =====================================================================
+# ============================================================
+# 4. WORKFLOWS
+# ============================================================
 
 def check_workflows() -> None:
 
-    base = json.loads(
-        read(BASE_WORKFLOW)
-    )
+    base = parse_json(BASE_WORKFLOW)
+    detailer = parse_json(DETAILER_WORKFLOW)
 
-    detailer = json.loads(
-        read(DETAILER_WORKFLOW)
-    )
-
-    require(
-        isinstance(base, dict),
-        "BASE workflow root "
-        "is not an object.",
-    )
-
-    require(
-        isinstance(detailer, dict),
-        "DETAILER workflow root "
-        "is not an object.",
-    )
-
-    base_nodes = base.get(
-        "nodes",
-        [],
-    )
-
-    detailer_nodes = detailer.get(
-        "nodes",
-        [],
-    )
-
-    require(
-        isinstance(base_nodes, list),
-        "BASE workflow nodes "
-        "is not a list.",
-    )
-
-    require(
-        isinstance(detailer_nodes, list),
-        "DETAILER workflow nodes "
-        "is not a list.",
-    )
-
-    base_types = {
-        node.get("type")
-        for node in base_nodes
-        if isinstance(node, dict)
-    }
-
-    detailer_types = {
-        node.get("type")
-        for node in detailer_nodes
-        if isinstance(node, dict)
-    }
-
-    # -------------------------------------------------------------
-    # BASE SOURCE WORKFLOW
-    # -------------------------------------------------------------
+    base_types = node_types(base)
+    detailer_types = node_types(detailer)
 
     base_required = {
         "LTXVBaseSampler",
@@ -431,41 +438,18 @@ def check_workflows() -> None:
         "VHS_VideoCombine",
     }
 
-    missing_base = (
+    missing = (
         base_required
         - base_types
     )
 
     require(
-        not missing_base,
-        "BASE workflow missing:\n"
-        + "\n".join(
-            sorted(missing_base)
-        ),
+        not missing,
+        "BASE workflow missing nodes:\n"
+        + "\n".join(sorted(missing)),
     )
 
-    print(
-        "OK   BASE source workflow"
-    )
-
-    # -------------------------------------------------------------
-    # DETAILER SOURCE WORKFLOW
-    #
-    # IMPORTANT:
-    #
-    # The source workflow intentionally contains:
-    #
-    # LTXVLatentUpsamplerModelLoader
-    #
-    # This is converted by ComfyWorkflowAdapter into:
-    #
-    # LatentUpscaleModelLoader
-    #
-    # Therefore the SOURCE workflow must NOT be required to already
-    # contain LatentUpscaleModelLoader.
-    # -------------------------------------------------------------
-
-    detailer_required_source = {
+    detailer_required = {
         "VHS_LoadVideo",
         "LTXVConditioning",
         "STGGuiderAdvanced",
@@ -480,17 +464,28 @@ def check_workflows() -> None:
         "VHS_VideoCombine",
     }
 
-    missing_detailer = (
-        detailer_required_source
+    missing = (
+        detailer_required
         - detailer_types
     )
 
     require(
-        not missing_detailer,
-        "DETAILER source workflow missing:\n"
-        + "\n".join(
-            sorted(missing_detailer)
-        ),
+        not missing,
+        "DETAILER source workflow missing nodes:\n"
+        + "\n".join(sorted(missing)),
+    )
+
+    require(
+        "LatentUpscaleModelLoader"
+        not in detailer_types,
+        "DETAILER source workflow unexpectedly contains "
+        "LatentUpscaleModelLoader.\n"
+        "The source workflow must use the legacy loader; "
+        "the adapter performs the conversion.",
+    )
+
+    print(
+        "OK   BASE workflow"
     )
 
     print(
@@ -498,152 +493,96 @@ def check_workflows() -> None:
     )
 
 
-# =====================================================================
-# 6. WORKFLOW ADAPTER STRUCTURE
-# =====================================================================
+# ============================================================
+# 5. WORKFLOW ADAPTER
+# ============================================================
 
-def check_workflow_adapter_structure() -> None:
+def check_adapter() -> None:
 
-    adapter_path = (
-        EXECUTION
-        / "comfy_workflow_adapter.py"
-    )
+    module = parse_python(ADAPTER)
 
-    module = parse(
-        adapter_path
-    )
-
-    available_classes = classes(
-        module
-    )
-
-    adapter_class = (
-        available_classes.get(
-            "ComfyWorkflowAdapter"
-        )
-    )
+    classes = {
+        node.name
+        for node in ast.walk(module)
+        if isinstance(node, ast.ClassDef)
+    }
 
     require(
-        adapter_class is not None,
-        "ComfyWorkflowAdapter "
-        "class is missing.",
+        "ComfyWorkflowAdapter" in classes,
+        "ComfyWorkflowAdapter class missing.",
     )
 
-    required_methods = {
-        "__init__",
-        "to_api_workflow",
+    source = read_text(ADAPTER)
+
+    required_strings = {
+        "LTXVLatentUpsamplerModelLoader",
+        "LatentUpscaleModelLoader",
         "apply_modern_compatibility",
         "validate_modern_detailer",
     }
 
-    available_methods = methods(
-        adapter_class
-    )
+    for text in required_strings:
 
-    missing = (
-        required_methods
-        - available_methods
-    )
-
-    require(
-        not missing,
-        "ComfyWorkflowAdapter missing methods:\n"
-        + "\n".join(
-            sorted(missing)
-        ),
-    )
+        require(
+            text in source,
+            f"ComfyWorkflowAdapter missing contract:\n{text}",
+        )
 
     print(
         "OK   ComfyWorkflowAdapter contract"
     )
 
 
-# =====================================================================
-# 7. REAL DETAILER ADAPTER CONVERSION
-# =====================================================================
-
-def check_detailer_adapter_conversion() -> None:
-
-    project_path = str(ROOT)
+def check_real_conversion() -> None:
 
     previous_path = list(sys.path)
 
     try:
 
-        if project_path not in sys.path:
+        root_string = str(ROOT)
 
-            sys.path.insert(
-                0,
-                project_path,
-            )
+        if root_string not in sys.path:
+            sys.path.insert(0, root_string)
 
         from execution.comfy_workflow_adapter import (
             ComfyWorkflowAdapter,
         )
 
-        adapter = (
-            ComfyWorkflowAdapter(
-                DETAILER_WORKFLOW
-            )
+        adapter = ComfyWorkflowAdapter(
+            DETAILER_WORKFLOW
         )
 
-        detailer_api = (
-            adapter.to_api_workflow()
-        )
+        api = adapter.to_api_workflow()
 
         require(
-            isinstance(
-                detailer_api,
-                dict,
-            ),
-            "DETAILER adapter did not "
-            "produce a dictionary.",
+            isinstance(api, dict) and api,
+            "DETAILER conversion produced empty API workflow.",
         )
 
-        require(
-            detailer_api,
-            "DETAILER adapter produced "
-            "an empty API workflow.",
-        )
+        adapter.validate_modern_detailer(api)
 
-        adapter.validate_modern_detailer(
-            detailer_api
-        )
-
-        api_types = {
+        types = {
             node.get("class_type")
-            for node in detailer_api.values()
-            if isinstance(
-                node,
-                dict,
-            )
+            for node in api.values()
+            if isinstance(node, dict)
         }
 
         require(
-            "LatentUpscaleModelLoader"
-            in api_types,
-            "DETAILER adapter conversion "
-            "did not produce:\n"
-            "LatentUpscaleModelLoader",
+            "LatentUpscaleModelLoader" in types,
+            "DETAILER conversion did not produce "
+            "LatentUpscaleModelLoader.",
         )
 
         require(
-            "LTXVLatentUpsamplerModelLoader"
-            not in api_types,
-            "Legacy loader survived "
-            "DETAILER adapter conversion:\n"
-            "LTXVLatentUpsamplerModelLoader",
+            "LTXVLatentUpsamplerModelLoader" not in types,
+            "Legacy LTX latent loader survived conversion.",
         )
-
-    except RuntimeError:
-        raise
 
     except Exception as error:
 
         fail(
-            "DETAILER adapter conversion failed:\n"
-            f"{type(error).__name__}: "
-            f"{error}"
+            "Real DETAILER adapter conversion failed:\n"
+            f"{type(error).__name__}: {error}"
         )
 
     finally:
@@ -651,7 +590,7 @@ def check_detailer_adapter_conversion() -> None:
         sys.path[:] = previous_path
 
     print(
-        "OK   DETAILER source → API conversion"
+        "OK   DETAILER graph → API conversion"
     )
 
     print(
@@ -663,247 +602,205 @@ def check_detailer_adapter_conversion() -> None:
     )
 
 
-# =====================================================================
-# 8. CORE CLASS CONTRACTS
-# =====================================================================
+# ============================================================
+# 6. COMPATIBILITY BUILDER
+# ============================================================
 
-def check_core_contracts() -> None:
+def check_compatibility_builder() -> None:
 
-    contracts = {
-        EXECUTION
-        / "comfy_client.py": {
-            "ComfyClient": {
-                "__init__",
-            },
-        },
+    source = read_text(
+        COMPATIBILITY_BUILDER
+    )
 
-        EXECUTION
-        / "shot_executor.py": {
-            "ShotExecutor": {
-                "__init__",
-            },
-        },
-
-        EXECUTION
-        / "production_runner.py": {
-            "ProductionRunner": {
-                "__init__",
-            },
-        },
-
-        PIPELINE
-        / "production_orchestrator.py": {
-            "ProductionOrchestrator": {
-                "__init__",
-            },
-        },
-
-        PLANNER
-        / "story_planner.py": {
-            "StoryPlanner": {
-                "__init__",
-            },
-        },
+    required = {
+        "compatibility_lock.yaml",
+        "legacy_ltx_098_compat",
+        "runtime_package",
+        "blur_internal",
+        "native torch",
+        "LTX098ModernCompat",
     }
 
-    for path, class_contracts in contracts.items():
+    for text in required:
 
-        module = parse(path)
-
-        available_classes = classes(
-            module
+        require(
+            text in source,
+            "Compatibility builder missing contract:\n"
+            f"{text}",
         )
 
-        for (
-            class_name,
-            required_methods,
-        ) in class_contracts.items():
-
-            class_node = (
-                available_classes.get(
-                    class_name
-                )
-            )
-
-            require(
-                class_node is not None,
-                "Required class missing:\n"
-                f"{path}\n"
-                f"{class_name}",
-            )
-
-            available_methods = methods(
-                class_node
-            )
-
-            missing = (
-                required_methods
-                - available_methods
-            )
-
-            require(
-                not missing,
-                "Required methods missing:\n"
-                f"{path}\n"
-                f"{class_name}\n"
-                + "\n".join(
-                    sorted(missing)
-                ),
-            )
-
     print(
-        "OK   core class contracts"
+        "OK   compatibility builder contract"
     )
 
 
-# =====================================================================
-# MAIN
-# =====================================================================
+# ============================================================
+# 7. APPLICATION WIRING
+# ============================================================
+
+def check_generate_video() -> None:
+
+    source = read_text(
+        GENERATE_VIDEO
+    )
+
+    required = {
+        "ProductionOrchestrator",
+        "ProductionManager",
+        "ProductionRunner",
+        "BASE_WORKFLOW",
+        "DETAILER_WORKFLOW",
+        "gpu-url",
+    }
+
+    for text in required:
+
+        require(
+            text in source,
+            "generate_video.py missing:\n"
+            f"{text}",
+        )
+
+    require(
+        "8219" not in source,
+        "Stale ComfyUI port 8219 exists in generate_video.py.\n"
+        "Use 8188.",
+    )
+
+    print(
+        "OK   production application wiring"
+    )
+
+
+# ============================================================
+# 8. KAGGLE WIRING
+# ============================================================
+
+def check_kaggle_wiring() -> None:
+
+    launch = read_text(
+        ROOT / "kaggle" / "launch.py"
+    )
+
+    bootstrap = read_text(
+        ROOT / "kaggle" / "bootstrap.py"
+    )
+
+    tunnel = read_text(
+        ROOT / "kaggle" / "start_comfyui_tunnel.py"
+    )
+
+    preflight = read_text(
+        ROOT / "kaggle" / "preflight_modern.py"
+    )
+
+    require(
+        "preflight_modern.py" in launch
+        or "preflight_modern.py" in launch.replace("\\", "/"),
+        "launch.py is not wired to preflight_modern.py.",
+    )
+
+    require(
+        "bootstrap.py" in launch,
+        "launch.py is not wired to bootstrap.py.",
+    )
+
+    require(
+        "start_comfyui_tunnel.py" in launch,
+        "launch.py is not wired to start_comfyui_tunnel.py.",
+    )
+
+    require(
+        "compatibility_lock.yaml" in bootstrap,
+        "bootstrap.py is not lock-driven.",
+    )
+
+    require(
+        "model_paths.yaml" not in bootstrap,
+        "bootstrap.py still references obsolete model_paths.yaml.",
+    )
+
+    require(
+        "8188" in tunnel,
+        "ComfyUI tunnel launcher is not using canonical port 8188.",
+    )
+
+    require(
+        "compatibility_lock.yaml" in preflight,
+        "preflight_modern.py is not lock-driven.",
+    )
+
+    print(
+        "OK   Kaggle bootstrap/launcher wiring"
+    )
+
+
+# ============================================================
+# 9. CPU PREFLIGHT SELF-CONTRACT
+# ============================================================
+
+def check_self_contract() -> None:
+
+    source = read_text(
+        Path(__file__)
+    )
+
+    require(
+        "model_paths.yaml" in source,
+        "CPU preflight must explicitly protect against "
+        "obsolete model_paths.yaml.",
+    )
+
+    require(
+        "compatibility_lock.yaml" in source,
+        "CPU preflight must validate compatibility_lock.yaml.",
+    )
+
+    print(
+        "OK   CPU preflight contract"
+    )
+
+
+# ============================================================
+# 10. FINAL
+# ============================================================
 
 def main() -> None:
 
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
+    print("LTX-13B CPU / REPOSITORY PREFLIGHT")
+    print("=" * 80)
 
-    print(
-        "LTX-13B CPU PREFLIGHT"
-    )
+    check_files()
+    check_python_syntax()
 
-    print(
-        "=" * 80
-    )
+    lock = load_lock()
 
-    print()
-
-    print(
-        "This test does NOT:"
-    )
-
-    print(
-        "  - install packages"
-    )
-
-    print(
-        "  - start ComfyUI"
-    )
-
-    print(
-        "  - load models"
-    )
-
-    print(
-        "  - require CUDA"
-    )
-
-    print(
-        "  - consume GPU"
-    )
-
-    print()
-
-    # -------------------------------------------------------------
-    # CHECK 1
-    # -------------------------------------------------------------
-
-    check_project_files()
-
-    # -------------------------------------------------------------
-    # CHECK 2
-    # -------------------------------------------------------------
-
-    check_python_ast()
-
-    # -------------------------------------------------------------
-    # CHECK 3
-    # -------------------------------------------------------------
-
-    check_packages()
-
-    # -------------------------------------------------------------
-    # CHECK 4
-    # -------------------------------------------------------------
-
-    check_import_graph()
-
-    # -------------------------------------------------------------
-    # CHECK 5
-    # -------------------------------------------------------------
-
+    check_lock(lock)
     check_workflows()
-
-    # -------------------------------------------------------------
-    # CHECK 6
-    # -------------------------------------------------------------
-
-    check_workflow_adapter_structure()
-
-    # -------------------------------------------------------------
-    # CHECK 7
-    # -------------------------------------------------------------
-
-    check_detailer_adapter_conversion()
-
-    # -------------------------------------------------------------
-    # CHECK 8
-    # -------------------------------------------------------------
-
-    check_core_contracts()
+    check_adapter()
+    check_real_conversion()
+    check_compatibility_builder()
+    check_generate_video()
+    check_kaggle_wiring()
+    check_self_contract()
 
     print()
+    print("=" * 80)
+    print("✅ CPU / REPOSITORY PREFLIGHT PASSED")
+    print("=" * 80)
 
     print(
-        "=" * 80
+        "Single source of truth: "
+        "kaggle/compatibility_lock.yaml"
     )
 
     print(
-        "CPU PREFLIGHT PASSED"
+        "Obsolete model_paths.yaml: NOT USED"
     )
 
     print(
-        "=" * 80
-    )
-
-    print(
-        "Repository structure: PASS"
-    )
-
-    print(
-        "Python syntax: PASS"
-    )
-
-    print(
-        "Package structure: PASS"
-    )
-
-    print(
-        "Project import graph: PASS"
-    )
-
-    print(
-        "BASE workflow: PASS"
-    )
-
-    print(
-        "DETAILER source workflow: PASS"
-    )
-
-    print(
-        "Workflow adapter contract: PASS"
-    )
-
-    print(
-        "Legacy → modern loader conversion: PASS"
-    )
-
-    print(
-        "Core pipeline contracts: PASS"
-    )
-
-    print()
-
-    print(
-        "No GPU was required."
+        "Canonical ComfyUI runtime port: 8188"
     )
 
 
