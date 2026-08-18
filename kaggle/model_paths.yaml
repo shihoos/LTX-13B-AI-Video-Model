@@ -1,4 +1,5 @@
 ltx13b:
+
   base_path: /kaggle/input
 
   diffusion_models: |
@@ -20,4 +21,7 @@ ltx13b:
     datasets/shihoos/ltx13b-enhancers
 
   upscale_models: |
+    datasets/shihoos/ltx13b-enhancers
+
+  latent_upscale_models: |
     datasets/shihoos/ltx13b-enhancers
