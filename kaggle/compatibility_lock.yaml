@@ -1,23 +1,30 @@
-# LTX-13B production compatibility lock
-# Proven by live Kaggle GPU execution on 2026-08-17.
-# Do not change these versions without an isolated compatibility test.
+# LTX-13B modern production compatibility lock
+# Proven by live Kaggle GPU execution on 2026-08-18.
 
 comfyui:
   repository: https://github.com/Comfy-Org/ComfyUI.git
-  tag: v0.3.44
-  commit: c5de4955bb91a2b136027a698aaecb8d19e3d892
+  tag: v0.33.1
+  commit: 72865f4f27eaf5396f8f36370e0a2be3a9a090ee
 
   frontend:
     package: comfyui-frontend-package
-    version: 1.23.4
+    version: 1.48.7
 
   workflow_templates:
     package: comfyui-workflow-templates
-    version: 0.1.35
+    version: 0.11.41
 
   embedded_docs:
     package: comfyui-embedded-docs
-    version: 0.2.4
+    version: 0.5.9
+
+  comfy_kitchen:
+    package: comfy-kitchen
+    version: 0.2.31
+
+  comfy_aimdo:
+    package: comfy-aimdo
+    version: 0.4.13
 
 python_runtime:
   torch: 2.10.0+cu128
@@ -30,7 +37,7 @@ python_runtime:
 custom_nodes:
   ComfyUI-LTXVideo:
     repository: https://github.com/Lightricks/ComfyUI-LTXVideo.git
-    commit: ee11be3ce229c3afd5fadf8a1258eb8b84af33b1
+    commit: ac4d99839020b983e956a8ab67ec38aec1b6e65a
 
   ComfyUI-KJNodes:
     repository: https://github.com/kijai/ComfyUI-KJNodes.git
@@ -43,6 +50,35 @@ custom_nodes:
   ComfyUI-GGUF:
     repository: https://github.com/city96/ComfyUI-GGUF.git
     commit: 6ea2651e7df66d7585f6ffee804b20e92fb38b8a
+
+legacy_ltx_098_compat:
+  repository: https://github.com/Lightricks/ComfyUI-LTXVideo.git
+  commit: ee11be3ce229c3afd5fadf8a1258eb8b84af33b1
+
+  runtime_package: LTX098ModernCompat
+
+  required_nodes:
+    - LTXVBaseSampler
+    - LTXVLoopingSampler
+    - LTXVTiledSampler
+    - LTXVTiledVAEDecode
+    - LTXVLatentUpsampler
+    - LTXVLatentUpsamplerModelLoader
+    - LTXVFilmGrain
+    - STGGuiderAdvanced
+    - Set VAE Decoder Noise
+
+  patches:
+    blur_internal:
+      signature: "blur_internal(image, blur_radius)"
+      implementation: "native torch Gaussian blur"
+      workflow_blur: 1
+
+detailer_compat:
+  legacy_loader: LTXVLatentUpsamplerModelLoader
+  modern_loader: LatentUpscaleModelLoader
+  output_type: LATENT_UPSCALE_MODEL
+  model_directory: models/latent_upscale_models
 
 models:
   ltx_q4:
@@ -68,6 +104,7 @@ models:
   spatial_upscaler:
     dataset: /kaggle/input/datasets/shihoos/ltx13b-enhancers
     filename: ltxv-spatial-upscaler-0.9.8.safetensors
+    target: models/latent_upscale_models/ltxv-spatial-upscaler-0.9.8.safetensors
 
 validation:
   base:
@@ -81,3 +118,11 @@ validation:
     fps: 24
     duration_seconds: 4.041667
     output_resolution: 1536x832
+
+  timing:
+    old_stack_base_seconds: 495
+    modern_stack_base_seconds: 303
+    old_stack_detailer_seconds: 1140
+    modern_stack_detailer_seconds: 945
+    old_stack_total_seconds: 1635
+    modern_stack_total_seconds: 1248
