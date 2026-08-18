@@ -3,15 +3,11 @@ __pycache__/
 *.py[cod]
 *.pyo
 
-# Environment
+# Environments
 .venv/
 venv/
 env/
 .env
-
-# Python caches
-.pytest_cache/
-.mypy_cache/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -23,6 +19,11 @@ models/
 *.pt
 *.pth
 *.gguf
+
+# Local ComfyUI runtime
+ComfyUI/
+.runtime_ltx098/
+cloudflared
 
 # Generated data
 data/stories/*.json
