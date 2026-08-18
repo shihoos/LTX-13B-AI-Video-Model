@@ -1,130 +1,451 @@
-from pathlib import Path
+from __future__ import annotations
+
+import importlib.metadata
+import os
 import sys
+from pathlib import Path
+
 
 PROJECT = Path(
-    "/kaggle/working/LTX-13B-AI-Video-Model"
+    os.getenv(
+        "LTX_PROJECT_ROOT",
+        "/kaggle/working/LTX-13B-AI-Video-Model",
+    )
 )
 
-MODEL_FILES = {
-    "LTX Q4": Path(
-        "/kaggle/input/datasets/shihoos/ltx13b-q4/"
-        "LTXV-13B-0.9.8-distilled-Q4_K_M.gguf"
-    ),
-    "T5 Q4": Path(
-        "/kaggle/input/datasets/shihoos/ltx13b-t5/"
-        "t5-v1_1-xxl-encoder-Q4_K_M.gguf"
-    ),
-    "VAE": Path(
-        "/kaggle/input/datasets/shihoos/ltx13b-vae/"
-        "LTXV-13B-0.9.8-distilled-VAE.safetensors"
-    ),
-    "IC-LoRA": Path(
-        "/kaggle/input/datasets/shihoos/ltx13b-enhancers/"
-        "ltxv-098-ic-lora-detailer-comfyui.safetensors"
-    ),
-    "Spatial upscaler": Path(
-        "/kaggle/input/datasets/shihoos/ltx13b-enhancers/"
-        "ltxv-spatial-upscaler-0.9.8.safetensors"
-    ),
-}
-
-
-print("=" * 80)
-print("LTX-13B MODERN STACK PREFLIGHT")
-print("=" * 80)
-
-if not PROJECT.exists():
-    raise FileNotFoundError(
-        f"Project not found: {PROJECT}"
-    )
-
-print(
-    f"✅ Project: {PROJECT}"
+LOCK_FILE = (
+    PROJECT
+    / "kaggle"
+    / "compatibility_lock.yaml"
 )
 
-print(
-    f"✅ Python: {sys.version.split()[0]}"
-)
 
-import torch
+def load_lock():
 
-print(
-    f"✅ PyTorch: {torch.__version__}"
-)
+    try:
+        import yaml
 
-print(
-    f"✅ CUDA build: {torch.version.cuda}"
-)
+    except ImportError as error:
 
-print(
-    f"CUDA available: "
-    f"{torch.cuda.is_available()}"
-)
+        raise RuntimeError(
+            "PyYAML is required to read "
+            "compatibility_lock.yaml."
+        ) from error
 
-if not torch.cuda.is_available():
-    raise RuntimeError(
-        "GPU is OFF. Turn Kaggle GPU ON."
-    )
+    if not LOCK_FILE.exists():
 
-if not torch.__version__.startswith(
-    "2.10.0+cu128"
-):
-    raise RuntimeError(
-        "Unexpected Torch version.\n"
-        f"Expected: 2.10.0+cu128\n"
-        f"Found: {torch.__version__}"
-    )
-
-for index in range(
-    torch.cuda.device_count()
-):
-    props = torch.cuda.get_device_properties(
-        index
-    )
-
-    print(
-        f"GPU {index}: "
-        f"{props.name} | "
-        f"{props.total_memory / (1024**3):.2f} GB"
-    )
-
-try:
-    import psutil
-
-    ram_gb = (
-        psutil.virtual_memory()
-        .total
-        / (1024**3)
-    )
-
-    print(
-        f"System RAM: {ram_gb:.2f} GB"
-    )
-
-    if ram_gb < 32:
-        print(
-            "⚠️ RAM below 32 GB; "
-            "the tested detailer approached 28–29 GB."
-        )
-
-except Exception:
-    print(
-        "ℹ️ RAM check unavailable."
-    )
-
-for label, path in MODEL_FILES.items():
-
-    if not path.exists():
         raise FileNotFoundError(
-            f"{label} missing:\n{path}"
+            "Compatibility lock not found:\n"
+            f"{LOCK_FILE}"
+        )
+
+    with LOCK_FILE.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
+
+        data = yaml.safe_load(
+            file
+        )
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
+        raise RuntimeError(
+            "compatibility_lock.yaml does not contain "
+            "a valid mapping."
+        )
+
+    return data
+
+
+def verify_model_sources(
+    lock,
+):
+
+    models = lock[
+        "models"
+    ]
+
+    for name, spec in (
+        models.items()
+    ):
+
+        dataset = Path(
+            spec[
+                "dataset"
+            ]
+        )
+
+        filename = spec[
+            "filename"
+        ]
+
+        path = (
+            dataset
+            / filename
+        )
+
+        if not path.exists():
+
+            raise FileNotFoundError(
+                f"{name} model missing:\n"
+                f"{path}"
+            )
+
+        print(
+            f"✅ {name}: {filename}"
+        )
+
+
+def verify_gpu(
+    lock,
+):
+
+    import torch
+
+    runtime = lock[
+        "python_runtime"
+    ]
+
+    expected_torch = runtime[
+        "torch"
+    ]
+
+    expected_cuda = (
+        expected_torch
+        .split("+cu", 1)[1]
+        if "+cu" in expected_torch
+        else None
+    )
+
+    print(
+        f"✅ PyTorch: {torch.__version__}"
+    )
+
+    print(
+        f"✅ CUDA build: {torch.version.cuda}"
+    )
+
+    print(
+        f"CUDA available: "
+        f"{torch.cuda.is_available()}"
+    )
+
+    if not torch.cuda.is_available():
+
+        raise RuntimeError(
+            "GPU is OFF. "
+            "Turn the Kaggle GPU ON."
+        )
+
+    if (
+        torch.__version__
+        != expected_torch
+    ):
+
+        raise RuntimeError(
+            "PyTorch version mismatch.\n"
+            f"Expected from lock: {expected_torch}\n"
+            f"Actual: {torch.__version__}"
+        )
+
+    if (
+        expected_cuda is not None
+        and torch.version.cuda is not None
+        and not torch.version.cuda.startswith(
+            expected_cuda
+        )
+    ):
+
+        raise RuntimeError(
+            "CUDA runtime mismatch.\n"
+            f"Expected family: CUDA {expected_cuda}\n"
+            f"Actual: CUDA {torch.version.cuda}"
+        )
+
+    expected_torchvision = runtime[
+        "torchvision"
+    ]
+
+    try:
+
+        import torchvision
+
+    except Exception as error:
+
+        raise RuntimeError(
+            "Could not import torchvision.\n"
+            f"{error}"
+        ) from error
+
+    if (
+        torchvision.__version__
+        != expected_torchvision
+    ):
+
+        raise RuntimeError(
+            "torchvision version mismatch.\n"
+            f"Expected from lock: "
+            f"{expected_torchvision}\n"
+            f"Actual: "
+            f"{torchvision.__version__}"
         )
 
     print(
-        f"✅ {label}: "
-        f"{path.name}"
+        f"✅ torchvision: "
+        f"{torchvision.__version__}"
     )
 
-print()
-print(
-    "✅ PREFLIGHT PASSED"
-)
+    for index in range(
+        torch.cuda.device_count()
+    ):
+
+        props = (
+            torch.cuda
+            .get_device_properties(
+                index
+            )
+        )
+
+        print(
+            f"GPU {index}: "
+            f"{props.name} | "
+            f"{props.total_memory / (1024**3):.2f} GB"
+        )
+
+    if torch.cuda.device_count() == 0:
+
+        raise RuntimeError(
+            "No CUDA GPU detected."
+        )
+
+
+def verify_locked_packages(
+    lock,
+):
+
+    comfy = lock[
+        "comfyui"
+    ]
+
+    runtime = lock[
+        "python_runtime"
+    ]
+
+    expected = {
+
+        comfy[
+            "frontend"
+        ][
+            "package"
+        ]:
+            comfy[
+                "frontend"
+            ][
+                "version"
+            ],
+
+        comfy[
+            "workflow_templates"
+        ][
+            "package"
+        ]:
+            comfy[
+                "workflow_templates"
+            ][
+                "version"
+            ],
+
+        comfy[
+            "embedded_docs"
+        ][
+            "package"
+        ]:
+            comfy[
+                "embedded_docs"
+            ][
+                "version"
+            ],
+
+        comfy[
+            "comfy_kitchen"
+        ][
+            "package"
+        ]:
+            comfy[
+                "comfy_kitchen"
+            ][
+                "version"
+            ],
+
+        comfy[
+            "comfy_aimdo"
+        ][
+            "package"
+        ]:
+            comfy[
+                "comfy_aimdo"
+            ][
+                "version"
+            ],
+
+        "torchsde":
+            runtime[
+                "torchsde"
+            ],
+
+        "spandrel":
+            runtime[
+                "spandrel"
+            ],
+
+        "av":
+            runtime[
+                "av"
+            ],
+
+        "gguf":
+            runtime[
+                "gguf"
+            ],
+    }
+
+    for (
+        package,
+        expected_version,
+    ) in expected.items():
+
+        try:
+
+            actual = (
+                importlib.metadata
+                .version(
+                    package
+                )
+            )
+
+        except importlib.metadata.PackageNotFoundError:
+
+            raise RuntimeError(
+                "Missing locked package:\n"
+                f"{package}=={expected_version}"
+            )
+
+        if (
+            actual
+            != expected_version
+        ):
+
+            raise RuntimeError(
+                f"{package} version mismatch.\n"
+                f"Expected: {expected_version}\n"
+                f"Actual:   {actual}"
+            )
+
+        print(
+            f"✅ {package}=={actual}"
+        )
+
+
+def verify_project(
+):
+
+    if not PROJECT.exists():
+
+        raise FileNotFoundError(
+            f"Project not found:\n"
+            f"{PROJECT}"
+        )
+
+    print(
+        f"✅ Project: {PROJECT}"
+    )
+
+
+def main():
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "LTX-13B MODERN STACK PREFLIGHT"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    lock = load_lock()
+
+    verify_project()
+
+    print(
+        f"✅ Python: "
+        f"{sys.version.split()[0]}"
+    )
+
+    verify_gpu(
+        lock
+    )
+
+    verify_locked_packages(
+        lock
+    )
+
+    verify_model_sources(
+        lock
+    )
+
+    try:
+
+        import psutil
+
+        ram_gb = (
+            psutil.virtual_memory()
+            .total
+            / (1024**3)
+        )
+
+        print(
+            f"✅ System RAM: "
+            f"{ram_gb:.2f} GB"
+        )
+
+        if ram_gb < 32:
+
+            print(
+                "⚠️ RAM below 32 GB. "
+                "The tested detailer used approximately "
+                "28–29 GB."
+            )
+
+    except Exception:
+
+        print(
+            "ℹ️ RAM information unavailable."
+        )
+
+    print()
+
+    print(
+        "✅ PREFLIGHT PASSED"
+    )
+
+    print(
+        "All runtime versions are sourced "
+        "from compatibility_lock.yaml."
+    )
+
+    print(
+        "No duplicated ComfyUI/frontend version "
+        "pins are used by this preflight."
+    )
+
+
+if __name__ == "__main__":
+
+    main()
