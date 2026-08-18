@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from execution.assembly_manager import (
@@ -32,23 +34,25 @@ from scheduler.gpu_scheduler import (
 class ProductionRunner:
 
     """
-    Production orchestrator.
+    Executes a complete production plan.
 
     Pipeline:
 
-        Shot
-          ↓
-        Base ComfyUI workflow
-          ↓
-        raw clip
-          ↓
-        IC-LoRA/detail/upscale ComfyUI workflow
-          ↓
-        high-resolution master clip
-          ↓
+        Production plan
+              ↓
+        GPU scheduler
+              ↓
+        ShotExecutor
+              ↓
+        BASE LTX generation
+              ↓
+        raw MP4
+              ↓
+        IC-LoRA + spatial detailer
+              ↓
+        final shot MP4
+              ↓
         FFmpeg assembly
-
-    Two GPU workers can process independent shots concurrently.
     """
 
     def __init__(
@@ -63,14 +67,20 @@ class ProductionRunner:
             project_root
         )
 
+        if not gpu_urls:
+            raise ValueError(
+                "At least one ComfyUI GPU URL is required."
+            )
+
+        self.gpu_urls = {
+            int(gpu_id): str(url).rstrip("/")
+            for gpu_id, url in gpu_urls.items()
+        }
+
         self.production_dir = (
             DATA_DIR
             / "production"
         )
-
-        # ----------------------------------------------------
-        # Detailer workflow path
-        # ----------------------------------------------------
 
         if detailer_workflow_path is None:
 
@@ -89,38 +99,25 @@ class ProductionRunner:
             detailer_workflow_path
         )
 
-        # ----------------------------------------------------
-        # Validate workflows immediately.
-        # Fail before GPU work starts.
-        # ----------------------------------------------------
-
         if not self.workflow_path.is_file():
 
             raise FileNotFoundError(
-                f"Base workflow not found:\n"
+                "Base workflow not found:\n"
                 f"{self.workflow_path}"
             )
 
         if not self.detailer_workflow_path.is_file():
 
             raise FileNotFoundError(
-                f"IC-LoRA detailer workflow not found:\n"
+                "Detailer workflow not found:\n"
                 f"{self.detailer_workflow_path}"
             )
-
-        # ----------------------------------------------------
-        # Persistent state
-        # ----------------------------------------------------
 
         self.checkpoints = (
             CheckpointManager(
                 self.production_dir
             )
         )
-
-        # ----------------------------------------------------
-        # Separate adapters for separate workflows.
-        # ----------------------------------------------------
 
         self.workflow_adapter = (
             ComfyWorkflowAdapter(
@@ -134,21 +131,18 @@ class ProductionRunner:
             )
         )
 
-        # ----------------------------------------------------
-        # One ComfyUI client per GPU.
-        # ----------------------------------------------------
-
         self.clients = {
             gpu_id: ComfyClient(
                 base_url=url
             )
-            for gpu_id, url in gpu_urls.items()
+            for gpu_id, url
+            in self.gpu_urls.items()
         }
 
         self.scheduler = (
             GPUScheduler(
                 gpu_ids=list(
-                    gpu_urls.keys()
+                    self.gpu_urls.keys()
                 )
             )
         )
@@ -170,21 +164,63 @@ class ProductionRunner:
     def prepare(
         self,
         production_plan: dict,
-    ):
+    ) -> None:
 
-        for shot in (
-            production_plan[
-                "shots"
-            ]
+        if not isinstance(
+            production_plan,
+            dict,
         ):
+            raise TypeError(
+                "production_plan must be a dict."
+            )
+
+        shots = production_plan.get(
+            "shots"
+        )
+
+        if not isinstance(
+            shots,
+            list,
+        ):
+            raise ValueError(
+                "production_plan['shots'] must be a list."
+            )
+
+        if not shots:
+            raise ValueError(
+                "Production plan contains no shots."
+            )
+
+        for shot in shots:
+
+            if not isinstance(
+                shot,
+                dict,
+            ):
+                raise ValueError(
+                    "Every production-plan shot must be a dict."
+                )
+
+            try:
+
+                shot_id = shot[
+                    "shot_id"
+                ]
+
+                scene_id = shot[
+                    "scene_id"
+                ]
+
+            except KeyError as error:
+
+                raise ValueError(
+                    "Production-plan shot is missing "
+                    f"required field: {error}"
+                ) from error
 
             self.checkpoints.initialize_shot(
-                shot_id=shot[
-                    "shot_id"
-                ],
-                scene_id=shot[
-                    "scene_id"
-                ],
+                shot_id=shot_id,
+                scene_id=scene_id,
             )
 
     # ========================================================
@@ -194,36 +230,29 @@ class ProductionRunner:
     def run(
         self,
         production_plan: dict,
-    ):
+    ) -> Path:
 
         self.prepare(
             production_plan
         )
 
+        shots = production_plan[
+            "shots"
+        ]
+
         pending_shots = []
 
-        for shot_data in (
-            production_plan[
-                "shots"
-            ]
-        ):
+        for shot_data in shots:
 
-            shot_id = (
-                shot_data[
-                    "shot_id"
-                ]
-            )
+            shot_id = shot_data[
+                "shot_id"
+            ]
 
             state = (
                 self.checkpoints.get_shot(
                     shot_id
                 )
             )
-
-            # ------------------------------------------------
-            # Truly complete only when final upscaled
-            # artifact exists.
-            # ------------------------------------------------
 
             if (
                 state
@@ -234,7 +263,9 @@ class ProductionRunner:
                     "upscaled_path"
                 )
                 and Path(
-                    state["upscaled_path"]
+                    state[
+                        "upscaled_path"
+                    ]
                 ).exists()
             ):
 
@@ -256,34 +287,42 @@ class ProductionRunner:
             f"{len(pending_shots)}"
         )
 
-        # ----------------------------------------------------
-        # Two GPU workers execute independent shots in parallel.
-        # ----------------------------------------------------
-
         if pending_shots:
 
-            self.scheduler.run(
-                pending_shots,
-                self._run_one_shot,
+            failures = (
+                self.scheduler.run(
+                    pending_shots,
+                    self._run_one_shot,
+                )
             )
 
-        # ----------------------------------------------------
-        # Verify EVERY shot has final output.
-        # ----------------------------------------------------
+            if failures:
+
+                details = "\n".join(
+                    (
+                        f"- GPU {gpu_id} "
+                        f"{shot_id}: {error}"
+                    )
+                    for (
+                        gpu_id,
+                        shot_id,
+                        error,
+                    )
+                    in failures
+                )
+
+                raise RuntimeError(
+                    "One or more shots failed:\n"
+                    f"{details}"
+                )
 
         completed = []
 
-        for shot_data in (
-            production_plan[
-                "shots"
-            ]
-        ):
+        for shot_data in shots:
 
-            shot_id = (
-                shot_data[
-                    "shot_id"
-                ]
-            )
+            shot_id = shot_data[
+                "shot_id"
+            ]
 
             state = (
                 self.checkpoints.get_shot(
@@ -292,7 +331,11 @@ class ProductionRunner:
             )
 
             if not state:
-                continue
+
+                raise RuntimeError(
+                    f"No checkpoint state exists "
+                    f"for {shot_id}."
+                )
 
             final_path = (
                 state.get(
@@ -303,40 +346,30 @@ class ProductionRunner:
             if (
                 state.get(
                     "status"
-                ) == "completed"
-                and final_path
-                and Path(
+                ) != "completed"
+                or not final_path
+                or not Path(
                     final_path
                 ).exists()
             ):
 
-                completed.append(
-                    final_path
+                raise RuntimeError(
+                    "Shot did not reach final "
+                    f"completed state: {shot_id}"
                 )
 
-        if len(completed) != len(
-            production_plan[
-                "shots"
-            ]
-        ):
-
-            raise RuntimeError(
-                "Not all shots are complete. "
-                "FFmpeg assembly was not started."
+            completed.append(
+                final_path
             )
 
-        # ----------------------------------------------------
-        # Avoid re-running FFmpeg if the final movie exists.
-        # ----------------------------------------------------
-
         existing = (
-            self.checkpoints.state[
-                "assembly"
-            ]
+            self.checkpoints
+            .get_assembly()
         )
 
         if (
-            existing.get(
+            existing
+            and existing.get(
                 "status"
             ) == "completed"
             and existing.get(
@@ -356,10 +389,6 @@ class ProductionRunner:
                 existing["path"]
             )
 
-        # ----------------------------------------------------
-        # Assemble final movie.
-        # ----------------------------------------------------
-
         self.checkpoints.set_assembly_started()
 
         try:
@@ -371,13 +400,32 @@ class ProductionRunner:
                 )
             )
 
+            if not Path(
+                final_path
+            ).exists():
+
+                raise RuntimeError(
+                    "Assembly completed without "
+                    "creating the final video."
+                )
+
             self.checkpoints.set_assembly_complete(
                 str(
                     final_path
                 )
             )
 
-            return final_path
+            print(
+                "✅ Production assembly complete:"
+            )
+
+            print(
+                final_path
+            )
+
+            return Path(
+                final_path
+            )
 
         except Exception as error:
 
@@ -388,24 +436,31 @@ class ProductionRunner:
             raise
 
     # ========================================================
-    # ONE SHOT ON ONE GPU
+    # ONE SHOT / ONE GPU
     # ========================================================
 
     def _run_one_shot(
         self,
         gpu_id: int,
         shot,
-    ):
+    ) -> None:
 
-        client = (
-            self.clients[gpu_id]
-        )
+        if gpu_id not in self.clients:
+
+            raise RuntimeError(
+                f"Unknown GPU worker ID: {gpu_id}"
+            )
+
+        client = self.clients[
+            gpu_id
+        ]
 
         if not client.health_check():
 
             raise RuntimeError(
                 f"ComfyUI worker for GPU "
-                f"{gpu_id} is unavailable."
+                f"{gpu_id} is unavailable at "
+                f"{self.gpu_urls[gpu_id]}"
             )
 
         executor = ShotExecutor(
@@ -432,9 +487,7 @@ class ProductionRunner:
         executor.execute_shot(
             shot=shot,
             gpu_id=gpu_id,
-            output_dir=(
-                self.output_dir
-            ),
+            output_dir=self.output_dir,
         )
 
     # ========================================================
@@ -450,70 +503,111 @@ class ProductionRunner:
             Shot,
         )
 
+        required = [
+            "shot_id",
+            "scene_id",
+            "order",
+            "duration_seconds",
+        ]
+
+        missing = [
+            key
+            for key in required
+            if key not in data
+        ]
+
+        if missing:
+
+            raise ValueError(
+                "Shot is missing required fields: "
+                + ", ".join(
+                    missing
+                )
+            )
+
         return Shot(
             shot_id=data[
                 "shot_id"
             ],
+
             scene_id=data[
                 "scene_id"
             ],
-            order=data[
-                "order"
-            ],
+
+            order=int(
+                data[
+                    "order"
+                ]
+            ),
+
             duration_seconds=float(
                 data[
                     "duration_seconds"
                 ]
             ),
+
             characters=data.get(
                 "characters",
                 [],
             ),
+
             location=data.get(
                 "location",
                 "",
             ),
+
             action=data.get(
                 "action",
                 "",
             ),
+
             camera_shot=data.get(
                 "camera_shot",
                 "",
             ),
+
             camera_movement=data.get(
                 "camera_movement",
                 "",
             ),
+
             lighting=data.get(
                 "lighting",
                 "",
             ),
+
             mood=data.get(
                 "mood",
                 "",
             ),
+
             visual_prompt=data.get(
                 "visual_prompt",
                 "",
             ),
+
             negative_prompt=data.get(
                 "negative_prompt",
                 "",
             ),
+
             previous_shot=data.get(
                 "previous_shot"
             ),
+
             next_shot=data.get(
                 "next_shot"
             ),
+
             continuity_notes=data.get(
                 "continuity_notes",
                 "",
             ),
+
             seed=data.get(
                 "seed"
             ),
+
             reference_images=data.get(
                 "reference_images",
                 [],
