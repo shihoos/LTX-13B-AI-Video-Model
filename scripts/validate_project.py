@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import importlib.metadata
 import json
-import re
 import shutil
 import subprocess
 import sys
-
 from pathlib import Path
 
 
@@ -21,21 +19,12 @@ LOCK_FILE = (
 )
 
 
-def fail(
-    message,
-):
-
-    raise RuntimeError(
-        message
-    )
+def fail(message: str) -> None:
+    raise RuntimeError(message)
 
 
-def check_file(
-    path: Path,
-):
-
+def check_file(path: Path) -> None:
     if not path.exists():
-
         fail(
             f"Missing file:\n{path}"
         )
@@ -45,27 +34,24 @@ def check_file(
     )
 
 
-def check_json(
-    path: Path,
-):
-
+def check_json(path: Path) -> dict:
     try:
-
         with path.open(
             "r",
             encoding="utf-8",
         ) as file:
-
-            data = json.load(
-                file
-            )
+            data = json.load(file)
 
     except Exception as error:
-
         fail(
             "Invalid JSON:\n"
             f"{path}\n"
             f"{error}"
+        )
+
+    if not isinstance(data, dict):
+        fail(
+            f"JSON root must be an object:\n{path}"
         )
 
     print(
@@ -75,58 +61,45 @@ def check_json(
     return data
 
 
-def load_lock():
-
-    check_file(
-        LOCK_FILE
-    )
+def load_lock() -> dict:
+    check_file(LOCK_FILE)
 
     try:
-
         import yaml
 
     except Exception as error:
-
         fail(
             "PyYAML unavailable:\n"
             f"{error}"
         )
 
-    with LOCK_FILE.open(
-        "r",
-        encoding="utf-8",
-    ) as file:
+    try:
+        with LOCK_FILE.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+            data = yaml.safe_load(file)
 
-        data = yaml.safe_load(
-            file
+    except Exception as error:
+        fail(
+            "Could not parse compatibility_lock.yaml:\n"
+            f"{error}"
         )
 
-    if not isinstance(
-        data,
-        dict,
-    ):
-
+    if not isinstance(data, dict):
         fail(
             "compatibility_lock.yaml "
             "is not a valid mapping."
         )
 
     required_sections = {
-
         "comfyui",
-
         "python_runtime",
-
         "custom_nodes",
-
         "legacy_ltx_098_compat",
-
         "detailer_compat",
-
         "models",
-
         "validation",
-
     }
 
     missing = (
@@ -135,13 +108,10 @@ def load_lock():
     )
 
     if missing:
-
         fail(
             "Compatibility lock is missing:\n"
             + "\n".join(
-                sorted(
-                    missing
-                )
+                sorted(missing)
             )
         )
 
@@ -154,7 +124,7 @@ def load_lock():
 
 def get_git_revision(
     path: Path,
-):
+) -> str:
 
     return (
         subprocess.check_output(
@@ -174,30 +144,24 @@ def get_git_revision(
 def check_git_revision(
     path: Path,
     expected: str,
-):
+) -> None:
 
     if not (
         path
         / ".git"
     ).exists():
-
         fail(
             f"Not a Git repository:\n{path}"
         )
 
-    actual = (
-        get_git_revision(
-            path
-        )
-    )
+    actual = get_git_revision(path)
 
     if actual != expected:
-
         fail(
             "Git revision mismatch:\n"
-            f"Path: {path}\n"
+            f"Path:     {path}\n"
             f"Expected: {expected}\n"
-            f"Actual: {actual}"
+            f"Actual:   {actual}"
         )
 
     print(
@@ -206,8 +170,8 @@ def check_git_revision(
 
 
 def validate_git_stack(
-    lock,
-):
+    lock: dict,
+) -> None:
 
     comfy = lock[
         "comfyui"
@@ -218,13 +182,13 @@ def validate_git_stack(
         / "ComfyUI"
     )
 
+    # ComfyUI is deliberately not committed into the project.
+    # It is materialized by kaggle/bootstrap.py.
     if not comfy_dir.exists():
-
         print(
             "SKIP Git runtime tree: "
-            "ComfyUI is not present in repository."
+            "ComfyUI has not been materialized locally."
         )
-
         return
 
     check_git_revision(
@@ -268,8 +232,8 @@ def validate_git_stack(
 
 
 def validate_runtime_packages(
-    lock,
-):
+    lock: dict,
+) -> None:
 
     comfy = lock[
         "comfyui"
@@ -280,7 +244,6 @@ def validate_runtime_packages(
     ]
 
     expected = {
-
         comfy[
             "frontend"
         ][
@@ -367,32 +330,24 @@ def validate_runtime_packages(
     ) in expected.items():
 
         try:
-
             actual = (
                 importlib.metadata
-                .version(
-                    package
-                )
+                .version(package)
             )
 
         except importlib.metadata.PackageNotFoundError:
-
             print(
                 f"SKIP {package}: "
-                "runtime package unavailable"
+                "runtime package is not installed "
+                "in this environment."
             )
-
             continue
 
-        if (
-            actual
-            != expected_version
-        ):
-
+        if actual != expected_version:
             fail(
                 f"{package} mismatch.\n"
                 f"Expected: {expected_version}\n"
-                f"Actual: {actual}"
+                f"Actual:   {actual}"
             )
 
         print(
@@ -401,20 +356,17 @@ def validate_runtime_packages(
 
 
 def validate_torch(
-    lock,
-):
+    lock: dict,
+) -> None:
 
     try:
-
         import torch
 
     except Exception as error:
-
         print(
             "SKIP Torch runtime check: "
             f"{error}"
         )
-
         return
 
     runtime = lock[
@@ -425,15 +377,11 @@ def validate_torch(
         "torch"
     ]
 
-    if (
-        torch.__version__
-        != expected_torch
-    ):
-
+    if torch.__version__ != expected_torch:
         fail(
-            f"Torch mismatch.\n"
+            "Torch mismatch.\n"
             f"Expected: {expected_torch}\n"
-            f"Actual: {torch.__version__}"
+            f"Actual:   {torch.__version__}"
         )
 
     print(
@@ -441,58 +389,45 @@ def validate_torch(
     )
 
     try:
-
         import torchvision
 
-        expected_tv = runtime[
-            "torchvision"
-        ]
-
-        if (
-            torchvision.__version__
-            != expected_tv
-        ):
-
-            fail(
-                f"torchvision mismatch.\n"
-                f"Expected: {expected_tv}\n"
-                f"Actual: "
-                f"{torchvision.__version__}"
-            )
-
-        print(
-            f"OK   torchvision=="
-            f"{torchvision.__version__}"
-        )
-
     except Exception as error:
-
-        print(
-            "SKIP torchvision runtime check: "
+        fail(
+            "torchvision import failed:\n"
             f"{error}"
         )
 
-
-def validate_init_files():
-
-    required = [
-
-        "execution/__init__.py",
-
-        "pipeline/__init__.py",
-
-        "planner/__init__.py",
-
-        "schemas/__init__.py",
-
-        "scheduler/__init__.py",
-
+    expected_torchvision = runtime[
+        "torchvision"
     ]
 
-    for relative in (
-        required
+    if (
+        torchvision.__version__
+        != expected_torchvision
     ):
+        fail(
+            "torchvision mismatch.\n"
+            f"Expected: {expected_torchvision}\n"
+            f"Actual:   {torchvision.__version__}"
+        )
 
+    print(
+        f"OK   torchvision=="
+        f"{torchvision.__version__}"
+    )
+
+
+def validate_init_files() -> None:
+
+    required = [
+        "execution/__init__.py",
+        "pipeline/__init__.py",
+        "planner/__init__.py",
+        "schemas/__init__.py",
+        "scheduler/__init__.py",
+    ]
+
+    for relative in required:
         check_file(
             PROJECT_ROOT
             / relative
@@ -503,10 +438,9 @@ def validate_init_files():
     )
 
 
-def validate_general_structure():
+def validate_general_structure() -> None:
 
     required = [
-
         "planner/config.py",
         "planner/qwen_loader.py",
         "planner/story_planner.py",
@@ -552,7 +486,6 @@ def validate_general_structure():
 
         "workflows/detailer/"
         "ltxv-13b-098-ic-lora-upscale.json",
-
     ]
 
     forbidden_runtime_file = (
@@ -562,24 +495,20 @@ def validate_general_structure():
     )
 
     if forbidden_runtime_file.exists():
-
         fail(
             "Deleted duplicate runtime lock "
             "still exists:\n"
             f"{forbidden_runtime_file}"
         )
 
-    for relative in (
-        required
-    ):
-
+    for relative in required:
         check_file(
             PROJECT_ROOT
             / relative
         )
 
 
-def validate_workflows():
+def validate_workflows() -> None:
 
     base = (
         PROJECT_ROOT
@@ -595,23 +524,15 @@ def validate_workflows():
         / "ltxv-13b-098-ic-lora-upscale.json"
     )
 
-    base_data = check_json(
-        base
-    )
-
-    detailer_data = check_json(
-        detailer
-    )
+    base_data = check_json(base)
+    detailer_data = check_json(detailer)
 
     base_types = {
-
         node.get("type")
-
         for node in base_data.get(
             "nodes",
             [],
         )
-
         if isinstance(
             node,
             dict,
@@ -619,14 +540,11 @@ def validate_workflows():
     }
 
     detailer_types = {
-
         node.get("type")
-
         for node in detailer_data.get(
             "nodes",
             [],
         )
-
         if isinstance(
             node,
             dict,
@@ -634,47 +552,27 @@ def validate_workflows():
     }
 
     required_base = {
-
         "LTXVBaseSampler",
-
         "LTXVConditioning",
-
         "STGGuiderAdvanced",
-
         "FloatToSigmas",
-
         "StringToFloatList",
-
         "UnetLoaderGGUF",
-
         "CLIPLoaderGGUF",
-
         "VAELoader",
-
         "Set VAE Decoder Noise",
-
         "VHS_VideoCombine",
-
     }
 
     required_detailer = {
-
         "VHS_LoadVideo",
-
         "LTXVLoopingSampler",
-
         "LTXVLatentUpsampler",
-
         "LTXVLatentUpsamplerModelLoader",
-
         "LTXVTiledVAEDecode",
-
         "LTXVFilmGrain",
-
         "LoraLoaderModelOnly",
-
         "VHS_VideoCombine",
-
     }
 
     missing_base = (
@@ -688,24 +586,18 @@ def validate_workflows():
     )
 
     if missing_base:
-
         fail(
             "BASE workflow missing node types:\n"
             + "\n".join(
-                sorted(
-                    missing_base
-                )
+                sorted(missing_base)
             )
         )
 
     if missing_detailer:
-
         fail(
             "DETAILER workflow missing node types:\n"
             + "\n".join(
-                sorted(
-                    missing_detailer
-                )
+                sorted(missing_detailer)
             )
         )
 
@@ -719,8 +611,8 @@ def validate_workflows():
 
 
 def validate_compatibility_source(
-    lock,
-):
+    lock: dict,
+) -> None:
 
     path = (
         PROJECT_ROOT
@@ -728,50 +620,30 @@ def validate_compatibility_source(
         / "prepare_modern_ltx.py"
     )
 
-    check_file(
-        path
-    )
+    check_file(path)
 
     text = path.read_text(
         encoding="utf-8"
     )
 
     required_markers = [
-
         "load_lock",
-
         "get_legacy_commit",
-
         "compatibility_lock.yaml",
-
         "blur_internal(image, blur_radius)",
-
         "LTXVBaseSampler",
-
         "LTXVLoopingSampler",
-
         "LTXVTiledSampler",
-
         "LTXVTiledVAEDecode",
-
         "LTXVLatentUpsampler",
-
         "LTXVLatentUpsamplerModelLoader",
-
         "LTXVFilmGrain",
-
         "STGGuiderAdvanced",
-
         "Set VAE Decoder Noise",
-
     ]
 
-    for marker in (
-        required_markers
-    ):
-
+    for marker in required_markers:
         if marker not in text:
-
             fail(
                 "Compatibility builder is missing:\n"
                 f"{marker}"
@@ -786,11 +658,19 @@ def validate_compatibility_source(
     )
 
     if legacy_commit in text:
-
         fail(
             "Legacy LTX commit is still hardcoded "
             "inside prepare_modern_ltx.py.\n"
             "It must come from compatibility_lock.yaml."
+        )
+
+    if (
+        "post_processing.Blur().blur("
+        in text
+    ):
+        fail(
+            "Legacy Blur().blur() call remains "
+            "in compatibility source."
         )
 
     print(
@@ -798,7 +678,9 @@ def validate_compatibility_source(
     )
 
 
-def validate_preflight_source():
+def validate_preflight_source(
+    lock: dict,
+) -> None:
 
     path = (
         PROJECT_ROOT
@@ -806,34 +688,22 @@ def validate_preflight_source():
         / "preflight_modern.py"
     )
 
-    check_file(
-        path
-    )
+    check_file(path)
 
     text = path.read_text(
         encoding="utf-8"
     )
 
     required_markers = [
-
         "compatibility_lock.yaml",
-
         "python_runtime",
-
         "models",
-
         "verify_gpu",
-
         "verify_locked_packages",
-
     ]
 
-    for marker in (
-        required_markers
-    ):
-
+    for marker in required_markers:
         if marker not in text:
-
             fail(
                 "Preflight is missing:\n"
                 f"{marker}"
@@ -848,7 +718,6 @@ def validate_preflight_source():
     )
 
     if expected_torch in text:
-
         fail(
             "Torch version is still hardcoded "
             "inside preflight_modern.py."
@@ -860,8 +729,8 @@ def validate_preflight_source():
 
 
 def validate_config_source(
-    lock,
-):
+    lock: dict,
+) -> None:
 
     path = (
         PROJECT_ROOT
@@ -869,41 +738,45 @@ def validate_config_source(
         / "config.py"
     )
 
-    check_file(
-        path
-    )
+    check_file(path)
 
     text = path.read_text(
         encoding="utf-8"
     )
 
     required_markers = [
-
         "compatibility_lock.yaml",
-
         "MODELS",
-
         "Q4_MODEL",
-
         "VAE_MODEL",
-
         "T5_MODEL",
-
         "DETAILER_LORA",
-
         "SPATIAL_UPSCALER",
-
     ]
 
-    for marker in (
-        required_markers
-    ):
-
+    for marker in required_markers:
         if marker not in text:
-
             fail(
                 "kaggle/config.py is missing:\n"
                 f"{marker}"
+            )
+
+    # Confirm that actual model filenames are not duplicated
+    # as independent hardcoded values in config.py.
+    for name, spec in (
+        lock[
+            "models"
+        ].items()
+    ):
+
+        filename = spec[
+            "filename"
+        ]
+
+        if filename in text:
+            fail(
+                "Model filename is still duplicated "
+                f"inside kaggle/config.py: {filename}"
             )
 
     print(
@@ -911,7 +784,7 @@ def validate_config_source(
     )
 
 
-def validate_adapter():
+def validate_adapter() -> None:
 
     path = (
         PROJECT_ROOT
@@ -919,34 +792,22 @@ def validate_adapter():
         / "comfy_workflow_adapter.py"
     )
 
-    check_file(
-        path
-    )
+    check_file(path)
 
     text = path.read_text(
         encoding="utf-8"
     )
 
     required_markers = [
-
         "LTXVLatentUpsamplerModelLoader",
-
         "LatentUpscaleModelLoader",
-
         "apply_modern_compatibility",
-
         "validate_modern_detailer",
-
         "set_input_video",
-
     ]
 
-    for marker in (
-        required_markers
-    ):
-
+    for marker in required_markers:
         if marker not in text:
-
             fail(
                 "Workflow adapter missing:\n"
                 f"{marker}"
@@ -957,7 +818,7 @@ def validate_adapter():
     )
 
 
-def validate_executor():
+def validate_executor() -> None:
 
     path = (
         PROJECT_ROOT
@@ -965,36 +826,23 @@ def validate_executor():
         / "shot_executor.py"
     )
 
-    check_file(
-        path
-    )
+    check_file(path)
 
     text = path.read_text(
         encoding="utf-8"
     )
 
     required_markers = [
-
         "_copy_raw_to_comfy_input",
-
         "VHS_LoadVideo",
-
         "execute_raw",
-
         "execute_detailer",
-
         "mark_raw_complete",
-
         "mark_upscaled_complete",
-
     ]
 
-    for marker in (
-        required_markers
-    ):
-
+    for marker in required_markers:
         if marker not in text:
-
             fail(
                 "ShotExecutor missing:\n"
                 f"{marker}"
@@ -1006,25 +854,19 @@ def validate_executor():
 
 
 def validate_model_lock(
-    lock,
-):
+    lock: dict,
+) -> None:
 
     models = lock[
         "models"
     ]
 
     required_model_keys = {
-
         "ltx_q4",
-
         "t5_q4",
-
         "vae",
-
         "ic_lora",
-
         "spatial_upscaler",
-
     }
 
     missing = (
@@ -1033,13 +875,10 @@ def validate_model_lock(
     )
 
     if missing:
-
         fail(
             "Model lock missing:\n"
             + "\n".join(
-                sorted(
-                    missing
-                )
+                sorted(missing)
             )
         )
 
@@ -1047,26 +886,17 @@ def validate_model_lock(
         models.items()
     ):
 
-        if not spec.get(
-            "dataset"
-        ):
-
+        if not spec.get("dataset"):
             fail(
                 f"{name} has no dataset path."
             )
 
-        if not spec.get(
-            "filename"
-        ):
-
+        if not spec.get("filename"):
             fail(
                 f"{name} has no filename."
             )
 
-        if not spec.get(
-            "target"
-        ):
-
+        if not spec.get("target"):
             fail(
                 f"{name} has no ComfyUI target."
             )
@@ -1076,21 +906,110 @@ def validate_model_lock(
         )
 
 
-def validate_external_tools():
+def validate_frontend_policy(
+    lock: dict,
+) -> None:
 
-    if (
-        shutil.which(
-            "ffmpeg"
+    frontend = lock[
+        "comfyui"
+    ][
+        "frontend"
+    ]
+
+    package = frontend[
+        "package"
+    ]
+
+    version = frontend[
+        "version"
+    ]
+
+    if not package:
+        fail(
+            "Frontend package is not defined "
+            "in compatibility_lock.yaml."
         )
-        is None
+
+    if not version:
+        fail(
+            "Frontend version is not defined "
+            "in compatibility_lock.yaml."
+        )
+
+    launch_path = (
+        PROJECT_ROOT
+        / "kaggle"
+        / "start_comfyui_tunnel.py"
+    )
+
+    start_path = (
+        PROJECT_ROOT
+        / "kaggle"
+        / "start_comfyui.py"
+    )
+
+    for path in (
+        launch_path,
+        start_path,
     ):
 
-        print(
-            "WARNING ffmpeg not found."
+        text = path.read_text(
+            encoding="utf-8"
         )
 
-    else:
+        if (
+            "--front-end-version"
+            in text
+        ):
+            fail(
+                f"{path} contains a frontend override. "
+                "Production startup must use the "
+                "locked frontend package."
+            )
 
+        if "@latest" in text:
+            fail(
+                f"{path} contains @latest. "
+                "Production startup must not use "
+                "an unpinned frontend."
+            )
+
+    print(
+        "OK   pinned frontend policy"
+    )
+
+
+def validate_runtime_lock_policy(
+) -> None:
+
+    forbidden = (
+        PROJECT_ROOT
+        / "kaggle"
+        / "runtime_requirements.lock"
+    )
+
+    if forbidden.exists():
+        fail(
+            "Duplicate runtime lock still exists:\n"
+            f"{forbidden}"
+        )
+
+    print(
+        "OK   duplicate runtime lock removed"
+    )
+
+
+def validate_external_tools() -> None:
+
+    if (
+        shutil.which("ffmpeg")
+        is None
+    ):
+        print(
+            "WARNING ffmpeg not found "
+            "in current environment."
+        )
+    else:
         print(
             "OK   ffmpeg"
         )
@@ -1116,31 +1035,23 @@ def main():
 
     validate_init_files()
 
-    validate_git_stack(
-        lock
-    )
+    validate_runtime_lock_policy()
 
-    validate_torch(
-        lock
-    )
+    validate_git_stack(lock)
 
-    validate_runtime_packages(
-        lock
-    )
+    validate_torch(lock)
 
-    validate_model_lock(
-        lock
-    )
+    validate_runtime_packages(lock)
 
-    validate_preflight_source()
+    validate_model_lock(lock)
 
-    validate_compatibility_source(
-        lock
-    )
+    validate_preflight_source(lock)
 
-    validate_config_source(
-        lock
-    )
+    validate_compatibility_source(lock)
+
+    validate_config_source(lock)
+
+    validate_frontend_policy(lock)
 
     validate_adapter()
 
@@ -1172,25 +1083,63 @@ def main():
     )
 
     print(
-        "Deleted duplicate:"
+        "Duplicate runtime lock:"
     )
 
     print(
-        "    kaggle/runtime_requirements.lock"
+        "    REMOVED"
     )
 
     print(
-        "Frontend is pinned; "
-        "no @latest override is required."
+        "Frontend:"
     )
 
     print(
-        "BASE + DETAILER + compatibility "
-        "architecture is represented."
+        "    PINNED"
     )
 
     print(
-        "All package __init__.py files are present."
+        "Frontend @latest override:"
+    )
+
+    print(
+        "    NONE"
+    )
+
+    print(
+        "BASE workflow:"
+    )
+
+    print(
+        "    VALIDATED"
+    )
+
+    print(
+        "DETAILER workflow:"
+    )
+
+    print(
+        "    VALIDATED"
+    )
+
+    print(
+        "Compatibility layer:"
+    )
+
+    print(
+        "    VALIDATED"
+    )
+
+    print(
+        "Package __init__.py files:"
+    )
+
+    print(
+        "    VALIDATED"
+    )
+
+    print(
+        "=" * 80
     )
 
 
