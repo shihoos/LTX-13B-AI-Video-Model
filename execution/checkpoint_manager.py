@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import json
+import threading
 
 from datetime import datetime
 
@@ -8,11 +11,11 @@ from pathlib import Path
 class CheckpointManager:
 
     """
-    Persistent production state.
+    Thread-safe persistent production state.
 
-    A shot is never considered complete merely because
-    a directory exists. Completion is explicitly recorded
-    in the manifest.
+    Multiple GPU workers may update different shots
+    concurrently, so all state mutations and saves are
+    protected by one re-entrant lock.
     """
 
     def __init__(
@@ -21,7 +24,9 @@ class CheckpointManager:
     ):
 
         self.production_dir = (
-            Path(production_dir)
+            Path(
+                production_dir
+            )
         )
 
         self.shots_dir = (
@@ -32,6 +37,10 @@ class CheckpointManager:
         self.state_path = (
             self.production_dir
             / "production_state.json"
+        )
+
+        self._lock = (
+            threading.RLock()
         )
 
         self.production_dir.mkdir(
@@ -48,24 +57,26 @@ class CheckpointManager:
             self._load_state()
         )
 
-    def _load_state(self) -> dict:
+    def _load_state(
+        self,
+    ) -> dict:
 
         if not self.state_path.exists():
 
+            now = (
+                datetime.now()
+                .isoformat()
+            )
+
             return {
-                "created_at": (
-                    datetime.now()
-                    .isoformat()
-                ),
-                "updated_at": (
-                    datetime.now()
-                    .isoformat()
-                ),
+                "created_at": now,
+                "updated_at": now,
                 "status": "not_started",
                 "shots": {},
                 "assembly": {
                     "status": "not_started",
                     "path": None,
+                    "error": None,
                 },
             }
 
@@ -74,75 +85,146 @@ class CheckpointManager:
             encoding="utf-8",
         ) as file:
 
-            return json.load(file)
-
-    def save(self):
-
-        self.state[
-            "updated_at"
-        ] = datetime.now().isoformat()
-
-        temp_path = (
-            self.state_path.with_suffix(
-                ".tmp"
-            )
-        )
-
-        with temp_path.open(
-            "w",
-            encoding="utf-8",
-        ) as file:
-
-            json.dump(
-                self.state,
-                file,
-                indent=2,
-                ensure_ascii=False,
+            state = json.load(
+                file
             )
 
-        temp_path.replace(
-            self.state_path
+        if not isinstance(
+            state,
+            dict,
+        ):
+
+            raise RuntimeError(
+                "production_state.json "
+                "is not a valid object."
+            )
+
+        state.setdefault(
+            "shots",
+            {},
         )
+
+        state.setdefault(
+            "assembly",
+            {
+                "status": "not_started",
+                "path": None,
+                "error": None,
+            },
+        )
+
+        state.setdefault(
+            "status",
+            "not_started",
+        )
+
+        return state
+
+    def save(self) -> None:
+
+        with self._lock:
+
+            self.state[
+                "updated_at"
+            ] = (
+                datetime.now()
+                .isoformat()
+            )
+
+            temp_path = (
+                self.state_path.with_suffix(
+                    ".tmp"
+                )
+            )
+
+            with temp_path.open(
+                "w",
+                encoding="utf-8",
+            ) as file:
+
+                json.dump(
+                    self.state,
+                    file,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+
+                file.flush()
+
+            temp_path.replace(
+                self.state_path
+            )
 
     def initialize_shot(
         self,
         shot_id: str,
         scene_id: str,
-    ):
+    ) -> None:
 
-        if shot_id not in self.state[
-            "shots"
-        ]:
+        with self._lock:
 
-            self.state["shots"][
-                shot_id
-            ] = {
-                "shot_id": shot_id,
-                "scene_id": scene_id,
-                "status": "pending",
-                "gpu_id": None,
-                "raw_path": None,
-                "detailer_path": None,
-                "upscaled_path": None,
-                "error": None,
-                "updated_at": (
-                    datetime.now()
-                    .isoformat()
-                ),
-            }
+            if shot_id not in self.state[
+                "shots"
+            ]:
 
-            self.save()
+                self.state[
+                    "shots"
+                ][
+                    shot_id
+                ] = {
+
+                    "shot_id":
+                        shot_id,
+
+                    "scene_id":
+                        scene_id,
+
+                    "status":
+                        "pending",
+
+                    "gpu_id":
+                        None,
+
+                    "raw_path":
+                        None,
+
+                    "detailer_path":
+                        None,
+
+                    "upscaled_path":
+                        None,
+
+                    "error":
+                        None,
+
+                    "updated_at":
+                        datetime.now()
+                        .isoformat(),
+                }
+
+                self.save()
 
     def get_shot(
         self,
         shot_id: str,
     ) -> dict | None:
 
-        return self.state[
-            "shots"
-        ].get(
-            shot_id
-        )
+        with self._lock:
+
+            shot = (
+                self.state[
+                    "shots"
+                ].get(
+                    shot_id
+                )
+            )
+
+            if shot is None:
+                return None
+
+            return dict(
+                shot
+            )
 
     def is_complete(
         self,
@@ -158,7 +240,9 @@ class CheckpointManager:
             return False
 
         return (
-            shot["status"]
+            shot.get(
+                "status"
+            )
             == "completed"
         )
 
@@ -166,183 +250,311 @@ class CheckpointManager:
         self,
         shot_id: str,
         gpu_id: int,
-    ):
+    ) -> None:
 
-        shot = self.state[
-            "shots"
-        ][shot_id]
+        with self._lock:
 
-        shot["status"] = (
-            "generating"
-        )
+            shot = self._require_shot(
+                shot_id
+            )
 
-        shot["gpu_id"] = gpu_id
+            shot[
+                "status"
+            ] = "generating"
 
-        shot["error"] = None
+            shot[
+                "gpu_id"
+            ] = gpu_id
 
-        shot["updated_at"] = (
-            datetime.now()
-            .isoformat()
-        )
+            shot[
+                "error"
+            ] = None
 
-        self.save()
+            shot[
+                "updated_at"
+            ] = (
+                datetime.now()
+                .isoformat()
+            )
+
+            self.save()
 
     def mark_raw_complete(
         self,
         shot_id: str,
         path: str,
-    ):
+    ) -> None:
 
-        shot = self.state[
-            "shots"
-        ][shot_id]
+        with self._lock:
 
-        shot["status"] = (
-            "raw_complete"
-        )
+            shot = self._require_shot(
+                shot_id
+            )
 
-        shot["raw_path"] = path
+            shot[
+                "status"
+            ] = "raw_complete"
 
-        shot["updated_at"] = (
-            datetime.now()
-            .isoformat()
-        )
+            shot[
+                "raw_path"
+            ] = str(
+                path
+            )
 
-        self.save()
+            shot[
+                "updated_at"
+            ] = (
+                datetime.now()
+                .isoformat()
+            )
+
+            self.save()
 
     def mark_detailer_complete(
         self,
         shot_id: str,
         path: str,
-    ):
+    ) -> None:
 
-        shot = self.state[
-            "shots"
-        ][shot_id]
+        with self._lock:
 
-        shot["status"] = (
-            "detailer_complete"
-        )
+            shot = self._require_shot(
+                shot_id
+            )
 
-        shot["detailer_path"] = path
+            shot[
+                "status"
+            ] = "detailer_complete"
 
-        shot["updated_at"] = (
-            datetime.now()
-            .isoformat()
-        )
+            shot[
+                "detailer_path"
+            ] = str(
+                path
+            )
 
-        self.save()
+            shot[
+                "updated_at"
+            ] = (
+                datetime.now()
+                .isoformat()
+            )
+
+            self.save()
 
     def mark_upscaled_complete(
         self,
         shot_id: str,
         path: str,
-    ):
+    ) -> None:
 
-        shot = self.state[
-            "shots"
-        ][shot_id]
+        with self._lock:
 
-        shot["status"] = (
-            "upscaled_complete"
-        )
+            shot = self._require_shot(
+                shot_id
+            )
 
-        shot["upscaled_path"] = path
+            shot[
+                "status"
+            ] = "upscaled_complete"
 
-        shot["updated_at"] = (
-            datetime.now()
-            .isoformat()
-        )
+            shot[
+                "upscaled_path"
+            ] = str(
+                path
+            )
 
-        self.save()
+            shot[
+                "updated_at"
+            ] = (
+                datetime.now()
+                .isoformat()
+            )
+
+            self.save()
 
     def mark_complete(
         self,
         shot_id: str,
-    ):
+    ) -> None:
 
-        shot = self.state[
-            "shots"
-        ][shot_id]
+        with self._lock:
 
-        shot["status"] = (
-            "completed"
-        )
+            shot = self._require_shot(
+                shot_id
+            )
 
-        shot["updated_at"] = (
-            datetime.now()
-            .isoformat()
-        )
+            shot[
+                "status"
+            ] = "completed"
 
-        self.save()
+            shot[
+                "updated_at"
+            ] = (
+                datetime.now()
+                .isoformat()
+            )
+
+            self.save()
 
     def mark_failed(
         self,
         shot_id: str,
         error: str,
-    ):
+    ) -> None:
 
-        shot = self.state[
-            "shots"
-        ][shot_id]
+        with self._lock:
 
-        shot["status"] = "failed"
+            shot = self._require_shot(
+                shot_id
+            )
 
-        shot["error"] = str(
-            error
-        )
+            shot[
+                "status"
+            ] = "failed"
 
-        shot["updated_at"] = (
-            datetime.now()
-            .isoformat()
-        )
+            shot[
+                "error"
+            ] = str(
+                error
+            )
 
-        self.save()
+            shot[
+                "updated_at"
+            ] = (
+                datetime.now()
+                .isoformat()
+            )
+
+            self.save()
 
     def reset_shot(
         self,
         shot_id: str,
-    ):
+    ) -> None:
 
-        shot = self.state[
-            "shots"
-        ][shot_id]
+        with self._lock:
 
-        shot["status"] = "pending"
-        shot["gpu_id"] = None
-        shot["error"] = None
+            shot = self._require_shot(
+                shot_id
+            )
 
-        self.save()
+            shot[
+                "status"
+            ] = "pending"
 
-    def set_assembly_started(self):
+            shot[
+                "gpu_id"
+            ] = None
 
-        self.state["assembly"][
-            "status"
-        ] = "assembling"
+            shot[
+                "error"
+            ] = None
 
-        self.save()
+            self.save()
+
+    def set_assembly_started(
+        self,
+    ) -> None:
+
+        with self._lock:
+
+            self.state[
+                "assembly"
+            ] = {
+
+                "status":
+                    "assembling",
+
+                "path":
+                    None,
+
+                "error":
+                    None,
+            }
+
+            self.save()
 
     def set_assembly_complete(
         self,
         path: str,
-    ):
+    ) -> None:
 
-        self.state["assembly"] = {
-            "status": "completed",
-            "path": path,
-        }
+        with self._lock:
 
-        self.save()
+            self.state[
+                "assembly"
+            ] = {
+
+                "status":
+                    "completed",
+
+                "path":
+                    str(
+                        path
+                    ),
+
+                "error":
+                    None,
+            }
+
+            self.save()
 
     def set_assembly_failed(
         self,
         error: str,
-    ):
+    ) -> None:
 
-        self.state["assembly"] = {
-            "status": "failed",
-            "path": None,
-            "error": str(error),
-        }
+        with self._lock:
 
-        self.save()
+            self.state[
+                "assembly"
+            ] = {
+
+                "status":
+                    "failed",
+
+                "path":
+                    None,
+
+                "error":
+                    str(
+                        error
+                    ),
+            }
+
+            self.save()
+
+    def get_assembly(
+        self,
+    ) -> dict:
+
+        with self._lock:
+
+            return dict(
+                self.state.get(
+                    "assembly",
+                    {},
+                )
+            )
+
+    def _require_shot(
+        self,
+        shot_id: str,
+    ) -> dict:
+
+        shot = (
+            self.state[
+                "shots"
+            ].get(
+                shot_id
+            )
+        )
+
+        if shot is None:
+
+            raise KeyError(
+                "Unknown shot ID: "
+                f"{shot_id}"
+            )
+
+        return shot
