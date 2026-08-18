@@ -25,114 +25,14 @@ CUSTOM = (
     / "custom_nodes"
 )
 
-
-COMFY_REPO = (
-    "https://github.com/Comfy-Org/ComfyUI.git"
-)
-
-COMFY_COMMIT = (
-    "72865f4f27eaf5396f8f36370e0a2be3a9a090ee"
+LOCK_FILE = (
+    PROJECT
+    / "kaggle"
+    / "compatibility_lock.yaml"
 )
 
 
-NODES = {
-
-    "ComfyUI-LTXVideo": (
-        "https://github.com/Lightricks/"
-        "ComfyUI-LTXVideo.git",
-
-        "ac4d99839020b983e956a8ab67ec38aec1b6e65a",
-    ),
-
-    "ComfyUI-KJNodes": (
-        "https://github.com/kijai/"
-        "ComfyUI-KJNodes.git",
-
-        "7ecb190ef91d988420cf0e682efb79ac7433c0b7",
-    ),
-
-    "ComfyUI-VideoHelperSuite": (
-        "https://github.com/Kosinkadink/"
-        "ComfyUI-VideoHelperSuite.git",
-
-        "4ee72c065db22c9d96c2427954dc69e7b908444b",
-    ),
-
-    "ComfyUI-GGUF": (
-        "https://github.com/city96/"
-        "ComfyUI-GGUF.git",
-
-        "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
-    ),
-}
-
-
-MODEL_SOURCES = {
-
-    "ltx_q4": Path(
-        "/kaggle/input/datasets/shihoos/"
-        "ltx13b-q4/"
-        "LTXV-13B-0.9.8-distilled-Q4_K_M.gguf"
-    ),
-
-    "t5_q4": Path(
-        "/kaggle/input/datasets/shihoos/"
-        "ltx13b-t5/"
-        "t5-v1_1-xxl-encoder-Q4_K_M.gguf"
-    ),
-
-    "vae": Path(
-        "/kaggle/input/datasets/shihoos/"
-        "ltx13b-vae/"
-        "LTXV-13B-0.9.8-distilled-VAE.safetensors"
-    ),
-
-    "ic_lora": Path(
-        "/kaggle/input/datasets/shihoos/"
-        "ltx13b-enhancers/"
-        "ltxv-098-ic-lora-detailer-comfyui.safetensors"
-    ),
-
-    "spatial": Path(
-        "/kaggle/input/datasets/shihoos/"
-        "ltx13b-enhancers/"
-        "ltxv-spatial-upscaler-0.9.8.safetensors"
-    ),
-}
-
-
-PINNED_PACKAGES = {
-
-    "comfyui-frontend-package":
-        "1.48.7",
-
-    "comfyui-workflow-templates":
-        "0.11.41",
-
-    "comfyui-embedded-docs":
-        "0.5.9",
-
-    "comfy-kitchen":
-        "0.2.31",
-
-    "comfy-aimdo":
-        "0.4.13",
-
-    "torchsde":
-        "0.2.6",
-
-    "spandrel":
-        "0.4.2",
-
-    "av":
-        "18.1.0",
-
-    "gguf":
-        "0.19.0",
-}
-
-
-FORBIDDEN_TORCH = {
+FORBIDDEN_TORCH_INSTALL = {
     "torch",
     "torchvision",
     "torchaudio",
@@ -143,7 +43,6 @@ def run(
     command,
     cwd=None,
 ):
-
     print(
         "$ "
         + " ".join(
@@ -159,6 +58,54 @@ def run(
         cwd=cwd,
         check=True,
     )
+
+
+def load_lock():
+
+    try:
+        import yaml
+
+    except ImportError:
+
+        run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "-q",
+                "pyyaml",
+            ]
+        )
+
+        import yaml
+
+    if not LOCK_FILE.exists():
+
+        raise FileNotFoundError(
+            f"Compatibility lock not found:\n"
+            f"{LOCK_FILE}"
+        )
+
+    with LOCK_FILE.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
+
+        data = yaml.safe_load(
+            file
+        )
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
+        raise RuntimeError(
+            "compatibility_lock.yaml is invalid."
+        )
+
+    return data
 
 
 def git_current(
@@ -239,17 +186,243 @@ def sync_repo(
     if actual != commit:
 
         raise RuntimeError(
-            f"Revision mismatch:\n"
+            "Git revision mismatch:\n"
+            f"Path:     {path}\n"
             f"Expected: {commit}\n"
-            f"Found:    {actual}"
+            f"Actual:   {actual}"
         )
 
 
-def verify_torch():
+def install_requirements(
+    source,
+):
+
+    if not source.exists():
+        return
+
+    destination = (
+        PROJECT
+        / ".runtime_requirements_filtered.txt"
+    )
+
+    lines = []
+
+    for raw in source.read_text(
+        encoding="utf-8"
+    ).splitlines():
+
+        line = raw.strip()
+
+        if (
+            not line
+            or line.startswith("#")
+        ):
+            continue
+
+        normalized = (
+            line
+            .split("==", 1)[0]
+            .split(">=", 1)[0]
+            .split("<=", 1)[0]
+            .split("~=", 1)[0]
+            .split(">", 1)[0]
+            .split("<", 1)[0]
+            .strip()
+            .lower()
+        )
+
+        if normalized in (
+            FORBIDDEN_TORCH_INSTALL
+        ):
+            continue
+
+        lines.append(
+            line
+        )
+
+    destination.write_text(
+        "\n".join(lines)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "-r",
+            str(destination),
+        ]
+    )
+
+    try:
+        destination.unlink()
+
+    except OSError:
+        pass
+
+
+def install_locked_packages(
+    lock,
+):
+
+    frontend = (
+        lock[
+            "comfyui"
+        ][
+            "frontend"
+        ]
+    )
+
+    templates = (
+        lock[
+            "comfyui"
+        ][
+            "workflow_templates"
+        ]
+    )
+
+    docs = (
+        lock[
+            "comfyui"
+        ][
+            "embedded_docs"
+        ]
+    )
+
+    kitchen = (
+        lock[
+            "comfyui"
+        ][
+            "comfy_kitchen"
+        ]
+    )
+
+    aimdo = (
+        lock[
+            "comfyui"
+        ][
+            "comfy_aimdo"
+        ]
+    )
+
+    runtime = (
+        lock[
+            "python_runtime"
+        ]
+    )
+
+    packages = [
+        (
+            frontend[
+                "package"
+            ],
+            frontend[
+                "version"
+            ],
+        ),
+        (
+            templates[
+                "package"
+            ],
+            templates[
+                "version"
+            ],
+        ),
+        (
+            docs[
+                "package"
+            ],
+            docs[
+                "version"
+            ],
+        ),
+        (
+            kitchen[
+                "package"
+            ],
+            kitchen[
+                "version"
+            ],
+        ),
+        (
+            aimdo[
+                "package"
+            ],
+            aimdo[
+                "version"
+            ],
+        ),
+        (
+            "torchsde",
+            runtime[
+                "torchsde"
+            ],
+        ),
+        (
+            "spandrel",
+            runtime[
+                "spandrel"
+            ],
+        ),
+        (
+            "av",
+            runtime[
+                "av"
+            ],
+        ),
+        (
+            "gguf",
+            runtime[
+                "gguf"
+            ],
+        ),
+    ]
+
+    for (
+        package,
+        version,
+    ) in packages:
+
+        run(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--no-deps",
+                f"{package}=={version}",
+            ]
+        )
+
+
+def verify_runtime(
+    lock,
+):
 
     import torch
 
-    print()
+    runtime = (
+        lock[
+            "python_runtime"
+        ]
+    )
+
+    expected_torch = (
+        runtime[
+            "torch"
+        ]
+    )
+
+    expected_torchvision = (
+        runtime[
+            "torchvision"
+        ]
+    )
+
     print(
         "=" * 80
     )
@@ -280,20 +453,45 @@ def verify_torch():
     if not torch.cuda.is_available():
 
         raise RuntimeError(
-            "CUDA unavailable. "
-            "Turn Kaggle GPU ON."
+            "CUDA is unavailable. "
+            "Turn the Kaggle GPU ON."
         )
 
-    if not (
+    if (
         torch.__version__
-        .startswith(
-            "2.10.0+cu128"
-        )
+        != expected_torch
     ):
 
         raise RuntimeError(
-            f"Wrong Torch version: "
-            f"{torch.__version__}"
+            "Torch version mismatch.\n"
+            f"Expected: {expected_torch}\n"
+            f"Actual:   {torch.__version__}"
+        )
+
+    try:
+
+        import torchvision
+
+        actual_torchvision = (
+            torchvision.__version__
+        )
+
+    except Exception as error:
+
+        raise RuntimeError(
+            "Could not import torchvision.\n"
+            f"{error}"
+        ) from error
+
+    if (
+        actual_torchvision
+        != expected_torchvision
+    ):
+
+        raise RuntimeError(
+            "Torchvision version mismatch.\n"
+            f"Expected: {expected_torchvision}\n"
+            f"Actual:   {actual_torchvision}"
         )
 
     for index in range(
@@ -306,156 +504,139 @@ def verify_torch():
         )
 
 
-def filter_requirements(
-    source,
+def verify_locked_packages(
+    lock,
 ):
 
-    destination = (
-        PROJECT
-        / ".runtime_requirements_filtered.txt"
+    comfy = lock[
+        "comfyui"
+    ]
+
+    runtime = lock[
+        "python_runtime"
+    ]
+
+    expected = {
+
+        comfy[
+            "frontend"
+        ][
+            "package"
+        ]:
+            comfy[
+                "frontend"
+            ][
+                "version"
+            ],
+
+        comfy[
+            "workflow_templates"
+        ][
+            "package"
+        ]:
+            comfy[
+                "workflow_templates"
+            ][
+                "version"
+            ],
+
+        comfy[
+            "embedded_docs"
+        ][
+            "package"
+        ]:
+            comfy[
+                "embedded_docs"
+            ][
+                "version"
+            ],
+
+        comfy[
+            "comfy_kitchen"
+        ][
+            "package"
+        ]:
+            comfy[
+                "comfy_kitchen"
+            ][
+                "version"
+            ],
+
+        comfy[
+            "comfy_aimdo"
+        ][
+            "package"
+        ]:
+            comfy[
+                "comfy_aimdo"
+            ][
+                "version"
+            ],
+
+        "torchsde":
+            runtime[
+                "torchsde"
+            ],
+
+        "spandrel":
+            runtime[
+                "spandrel"
+            ],
+
+        "av":
+            runtime[
+                "av"
+            ],
+
+        "gguf":
+            runtime[
+                "gguf"
+            ],
+    }
+
+    print()
+    print(
+        "=" * 80
     )
 
-    lines = []
-
-    for raw in source.read_text(
-        encoding="utf-8"
-    ).splitlines():
-
-        line = raw.strip()
-
-        if (
-            not line
-            or line.startswith("#")
-        ):
-
-            continue
-
-        package = (
-            line
-            .split(
-                "==",
-                1,
-            )[0]
-            .split(
-                ">=",
-                1,
-            )[0]
-            .split(
-                "<=",
-                1,
-            )[0]
-            .split(
-                "~=",
-                1,
-            )[0]
-            .split(
-                ">",
-                1,
-            )[0]
-            .split(
-                "<",
-                1,
-            )[0]
-            .strip()
-            .lower()
-        )
-
-        if (
-            package
-            in FORBIDDEN_TORCH
-        ):
-
-            continue
-
-        lines.append(
-            line
-        )
-
-    destination.write_text(
-        "\n".join(
-            lines
-        )
-        + "\n",
-        encoding="utf-8",
+    print(
+        "LOCKED PYTHON PACKAGES"
     )
 
-    return destination
-
-
-def install_requirements(
-    source,
-):
-
-    if not source.exists():
-
-        return
-
-    filtered = (
-        filter_requirements(
-            source
-        )
+    print(
+        "=" * 80
     )
-
-    run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "-q",
-            "-r",
-            str(filtered),
-        ]
-    )
-
-    try:
-
-        filtered.unlink()
-
-    except OSError:
-
-        pass
-
-
-def install_pinned_packages():
 
     for (
         package,
-        version,
-    ) in PINNED_PACKAGES.items():
+        expected_version,
+    ) in expected.items():
 
-        run(
-            [
-                sys.executable,
-                "-m",
-                "pip",
-                "install",
-                "--no-deps",
-                f"{package}=={version}",
-            ]
-        )
+        try:
 
-
-def verify_pinned_packages():
-
-    for (
-        package,
-        expected,
-    ) in PINNED_PACKAGES.items():
-
-        actual = (
-            importlib.metadata
-            .version(
-                package
+            actual = (
+                importlib.metadata
+                .version(
+                    package
+                )
             )
-        )
 
-        if actual != expected:
+        except importlib.metadata.PackageNotFoundError:
 
             raise RuntimeError(
-                f"{package}: "
-                f"expected {expected}, "
-                f"found {actual}"
+                f"Missing required package: "
+                f"{package}"
+            )
+
+        if (
+            actual
+            != expected_version
+        ):
+
+            raise RuntimeError(
+                f"{package} mismatch.\n"
+                f"Expected: {expected_version}\n"
+                f"Actual:   {actual}"
             )
 
         print(
@@ -463,48 +644,209 @@ def verify_pinned_packages():
         )
 
 
-def link_models():
+def install_comfyui(
+    lock,
+):
 
-    direct = {
+    comfy = lock[
+        "comfyui"
+    ]
 
-        "ltx_q4":
-            COMFY
-            / "models"
-            / "unet"
-            / MODEL_SOURCES[
-                "ltx_q4"
-            ].name,
+    sync_repo(
+        comfy[
+            "repository"
+        ],
+        COMFY,
+        comfy[
+            "commit"
+        ],
+    )
 
-        "t5_q4":
-            COMFY
-            / "models"
-            / "clip"
-            / MODEL_SOURCES[
-                "t5_q4"
-            ].name,
 
-        "vae":
-            COMFY
-            / "models"
-            / "vae"
-            / MODEL_SOURCES[
-                "vae"
-            ].name,
+def install_custom_nodes(
+    lock,
+):
 
-        "ic_lora":
-            COMFY
-            / "models"
-            / "loras"
-            / MODEL_SOURCES[
-                "ic_lora"
-            ].name,
-    }
+    nodes = lock[
+        "custom_nodes"
+    ]
 
-    spatial_dirs = [
+    for name, spec in (
+        nodes.items()
+    ):
 
+        sync_repo(
+            spec[
+                "repository"
+            ],
+            CUSTOM / name,
+            spec[
+                "commit"
+            ],
+        )
+
+
+def install_node_requirements():
+
+    install_requirements(
         COMFY
-        / "models"
-        / "latent_upscale_models",
+        / "requirements.txt"
+    )
+
+    for name in (
+        "ComfyUI-LTXVideo",
+        "ComfyUI-KJNodes",
+        "ComfyUI-VideoHelperSuite",
+        "ComfyUI-GGUF",
+    ):
+
+        install_requirements(
+            CUSTOM
+            / name
+            / "requirements.txt"
+        )
+
+
+def link_one_model(
+    source,
+    target,
+):
+
+    target.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    if (
+        target.exists()
+        or target.is_symlink()
+    ):
+
+        target.unlink()
+
+    target.symlink_to(
+        source.resolve()
+    )
+
+    print(
+        f"✅ {target}"
+    )
+
+
+def link_models(
+    lock,
+):
+
+    sources = {}
+
+    for name, spec in (
+        lock[
+            "models"
+        ].items()
+    ):
+
+        source = (
+            Path(
+                spec[
+                    "dataset"
+                ]
+            )
+            / spec[
+                "filename"
+            ]
+        )
+
+        if not source.exists():
+
+            raise FileNotFoundError(
+                f"{name} model not found:\n"
+                f"{source}"
+            )
+
+        sources[
+            name
+        ] = source
+
+    model_specs = (
+        lock[
+            "models"
+        ]
+    )
+
+    # Base model.
+    link_one_model(
+        sources[
+            "ltx_q4"
+        ],
+        COMFY
+        / model_specs[
+            "ltx_q4"
+        ][
+            "target"
+        ],
+    )
+
+    # T5.
+    link_one_model(
+        sources[
+            "t5_q4"
+        ],
+        COMFY
+        / model_specs[
+            "t5_q4"
+        ][
+            "target"
+        ],
+    )
+
+    # VAE.
+    link_one_model(
+        sources[
+            "vae"
+        ],
+        COMFY
+        / model_specs[
+            "vae"
+        ][
+            "target"
+        ],
+    )
+
+    # IC-LoRA.
+    link_one_model(
+        sources[
+            "ic_lora"
+        ],
+        COMFY
+        / model_specs[
+            "ic_lora"
+        ][
+            "target"
+        ],
+    )
+
+    # Canonical modern latent-upscale location.
+    spatial = sources[
+        "spatial_upscaler"
+    ]
+
+    canonical_target = (
+        COMFY
+        / model_specs[
+            "spatial_upscaler"
+        ][
+            "target"
+        ]
+    )
+
+    link_one_model(
+        spatial,
+        canonical_target,
+    )
+
+    # Additional compatibility discovery paths
+    # used by ComfyUI/LTX versions.
+    extra_dirs = [
 
         COMFY
         / "models"
@@ -523,111 +865,52 @@ def link_models():
         / "upscalers",
     ]
 
-    for (
-        key,
-        source,
-    ) in MODEL_SOURCES.items():
-
-        if not source.exists():
-
-            raise FileNotFoundError(
-                f"{key} model not found:\n"
-                f"{source}"
-            )
-
-    for (
-        key,
-        target,
-    ) in direct.items():
-
-        target.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        if (
-            target.exists()
-            or target.is_symlink()
-        ):
-
-            target.unlink()
-
-        target.symlink_to(
-            MODEL_SOURCES[
-                key
-            ].resolve()
-        )
-
-        print(
-            f"✅ {key}: "
-            f"{target}"
-        )
-
-    spatial = (
-        MODEL_SOURCES[
-            "spatial"
-        ]
-    )
-
     for directory in (
-        spatial_dirs
+        extra_dirs
     ):
 
-        directory.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
-        target = (
+        link_one_model(
+            spatial,
             directory
-            / spatial.name
+            / spatial.name,
         )
 
-        if (
-            target.exists()
-            or target.is_symlink()
-        ):
 
-            target.unlink()
+def write_extra_model_paths(
+    lock,
+):
 
-        target.symlink_to(
-            spatial.resolve()
-        )
-
-    print(
-        "✅ spatial model linked"
-    )
-
-
-def write_extra_model_paths():
+    models = lock[
+        "models"
+    ]
 
     content = f"""
 ltx_project:
   is_default: true
 
   diffusion_models: |
-    {MODEL_SOURCES["ltx_q4"].parent}
+    {models["ltx_q4"]["dataset"]}
 
   unet: |
-    {MODEL_SOURCES["ltx_q4"].parent}
+    {models["ltx_q4"]["dataset"]}
 
   text_encoders: |
-    {MODEL_SOURCES["t5_q4"].parent}
+    {models["t5_q4"]["dataset"]}
 
   clip: |
-    {MODEL_SOURCES["t5_q4"].parent}
+    {models["t5_q4"]["dataset"]}
 
   vae: |
-    {MODEL_SOURCES["vae"].parent}
+    {models["vae"]["dataset"]}
 
   loras: |
-    {MODEL_SOURCES["ic_lora"].parent}
+    {models["ic_lora"]["dataset"]}
 
   upscale_models: |
-    {MODEL_SOURCES["spatial"].parent}
+    {models["spatial_upscaler"]["dataset"]}
 
   latent_upscale_models: |
-    {MODEL_SOURCES["spatial"].parent}
+    {models["spatial_upscaler"]["dataset"]}
 """
 
     (
@@ -639,7 +922,9 @@ ltx_project:
     )
 
 
-def prepare_compatibility():
+def build_compatibility(
+    lock,
+):
 
     script = (
         PROJECT
@@ -647,12 +932,95 @@ def prepare_compatibility():
         / "prepare_modern_ltx.py"
     )
 
+    legacy = lock[
+        "legacy_ltx_098_compat"
+    ]
+
+    expected_commit = (
+        legacy[
+            "commit"
+        ]
+    )
+
+    # The compatibility builder owns the actual source download.
+    os.environ[
+        "LTX_LEGACY_COMMIT"
+    ] = expected_commit
+
     run(
         [
             sys.executable,
             str(script),
         ]
     )
+
+
+def verify_git_stack(
+    lock,
+):
+
+    print()
+    print(
+        "=" * 80
+    )
+
+    print(
+        "GIT STACK VERIFICATION"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    expected_comfy = (
+        lock[
+            "comfyui"
+        ][
+            "commit"
+        ]
+    )
+
+    actual_comfy = git_current(
+        COMFY
+    )
+
+    if (
+        actual_comfy
+        != expected_comfy
+    ):
+
+        raise RuntimeError(
+            "ComfyUI revision mismatch."
+        )
+
+    print(
+        f"✅ ComfyUI {actual_comfy}"
+    )
+
+    for name, spec in (
+        lock[
+            "custom_nodes"
+        ].items()
+    ):
+
+        actual = git_current(
+            CUSTOM / name
+        )
+
+        if (
+            actual
+            != spec[
+                "commit"
+            ]
+        ):
+
+            raise RuntimeError(
+                f"{name} revision mismatch."
+            )
+
+        print(
+            f"✅ {name} {actual}"
+        )
 
 
 def main():
@@ -676,66 +1044,57 @@ def main():
             f"{PROJECT}"
         )
 
-    verify_torch()
+    lock = load_lock()
 
-    sync_repo(
-        COMFY_REPO,
-        COMFY,
-        COMFY_COMMIT,
+    verify_runtime(
+        lock
     )
 
-    for (
-        name,
-        pair,
-    ) in NODES.items():
-
-        url, commit = pair
-
-        sync_repo(
-            url,
-            CUSTOM / name,
-            commit,
-        )
-
-    install_requirements(
-        COMFY
-        / "requirements.txt"
+    install_comfyui(
+        lock
     )
 
-    install_requirements(
-        CUSTOM
-        / "ComfyUI-LTXVideo"
-        / "requirements.txt"
+    install_custom_nodes(
+        lock
     )
 
-    for name in (
-        "ComfyUI-KJNodes",
-        "ComfyUI-VideoHelperSuite",
-        "ComfyUI-GGUF",
-    ):
+    install_node_requirements()
 
-        install_requirements(
-            CUSTOM
-            / name
-            / "requirements.txt"
-        )
+    install_locked_packages(
+        lock
+    )
 
-    install_pinned_packages()
+    verify_runtime(
+        lock
+    )
 
-    verify_pinned_packages()
+    verify_locked_packages(
+        lock
+    )
 
-    prepare_compatibility()
+    build_compatibility(
+        lock
+    )
 
-    link_models()
+    link_models(
+        lock
+    )
 
-    write_extra_model_paths()
+    write_extra_model_paths(
+        lock
+    )
 
+    verify_git_stack(
+        lock
+    )
+
+    print()
     print(
         "=" * 80
     )
 
     print(
-        "MODERN STACK BOOTSTRAP COMPLETE"
+        "✅ MODERN STACK BOOTSTRAP COMPLETE"
     )
 
     print(
@@ -755,7 +1114,20 @@ def main():
     )
 
     print(
-        "Current LTXVideo:",
+        "Frontend version:",
+        importlib.metadata.version(
+            lock[
+                "comfyui"
+            ][
+                "frontend"
+            ][
+                "package"
+            ]
+        ),
+    )
+
+    print(
+        "Official current LTXVideo:",
         git_current(
             CUSTOM
             / "ComfyUI-LTXVideo"
@@ -763,9 +1135,13 @@ def main():
     )
 
     print(
-        "Compatibility:",
+        "Modern compatibility package:",
         CUSTOM
         / "LTX098ModernCompat",
+    )
+
+    print(
+        "No @latest frontend override is used."
     )
 
 
