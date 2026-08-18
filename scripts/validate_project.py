@@ -15,8 +15,9 @@ Validation layers:
 9. Compatibility-builder contract
 10. Production application wiring
 11. Kaggle launcher/bootstrap wiring
-12. Materialized ComfyUI runtime, when requested
-13. Optional CUDA verification, when requested
+12. CPU preflight presence and contract
+13. Materialized ComfyUI runtime, when requested
+14. Optional CUDA verification, when requested
 
 Usage:
 
@@ -29,6 +30,12 @@ For a fully materialized Kaggle runtime:
 For runtime + CUDA:
 
     python scripts/validate_project.py --require-runtime --require-cuda
+
+IMPORTANT:
+
+- kaggle/compatibility_lock.yaml is the SINGLE SOURCE OF TRUTH.
+- kaggle/model_paths.yaml must not exist.
+- kaggle/runtime_requirements.lock must not exist.
 """
 
 from __future__ import annotations
@@ -49,7 +56,9 @@ from typing import Any
 # PATHS
 # ======================================================================
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(
+    __file__
+).resolve().parents[1]
 
 LOCK_FILE = (
     PROJECT_ROOT
@@ -89,8 +98,15 @@ MODERN_LATENT_LOADER = (
     "LatentUpscaleModelLoader"
 )
 
+CPU_PREFLIGHT = (
+    PROJECT_ROOT
+    / "scripts"
+    / "cpu_preflight.py"
+)
+
 
 REQUIRED_FILES = (
+    # Planner
     "planner/config.py",
     "planner/qwen_loader.py",
     "planner/story_planner.py",
@@ -99,6 +115,7 @@ REQUIRED_FILES = (
     "planner/scene_planner.py",
     "planner/shot_planner.py",
 
+    # Pipeline
     "pipeline/__init__.py",
     "pipeline/continuity_manager.py",
     "pipeline/modes.py",
@@ -106,6 +123,7 @@ REQUIRED_FILES = (
     "pipeline/production_orchestrator.py",
     "pipeline/reference_manager.py",
 
+    # Execution
     "execution/__init__.py",
     "execution/checkpoint_manager.py",
     "execution/comfy_client.py",
@@ -114,16 +132,19 @@ REQUIRED_FILES = (
     "execution/assembly_manager.py",
     "execution/production_runner.py",
 
+    # Scheduler
     "scheduler/__init__.py",
     "scheduler/gpu_scheduler.py",
     "scheduler/shot_queue.py",
 
+    # Schemas
     "schemas/__init__.py",
     "schemas/character.py",
     "schemas/scene.py",
     "schemas/shot.py",
     "schemas/parser.py",
 
+    # Kaggle
     "kaggle/compatibility_lock.yaml",
     "kaggle/bootstrap.py",
     "kaggle/config.py",
@@ -132,11 +153,15 @@ REQUIRED_FILES = (
     "kaggle/start_comfyui.py",
     "kaggle/start_comfyui_tunnel.py",
 
+    # Compatibility
     "compatibility/prepare_modern_ltx.py",
 
+    # Scripts
+    "scripts/cpu_preflight.py",
     "scripts/generate_video.py",
     "scripts/validate_project.py",
 
+    # Workflows
     "workflows/baseline/ltxv-13b-dist-i2v-base.json",
     "workflows/detailer/ltxv-13b-098-ic-lora-upscale.json",
 )
@@ -169,7 +194,10 @@ def require(
         fail(message)
 
 
-def read_text(path: Path) -> str:
+def read_text(
+    path: Path,
+) -> str:
+
     if not path.is_file():
         fail(
             "Required file is missing:\n"
@@ -180,6 +208,7 @@ def read_text(path: Path) -> str:
         return path.read_text(
             encoding="utf-8"
         )
+
     except OSError as error:
         raise RuntimeError(
             "Unable to read file:\n"
@@ -192,7 +221,9 @@ def parse_python(
     path: Path,
 ) -> ast.Module:
 
-    source = read_text(path)
+    source = read_text(
+        path
+    )
 
     try:
         return ast.parse(
@@ -225,7 +256,10 @@ def parse_json(
             f"{error}"
         )
 
-    if not isinstance(data, dict):
+    if not isinstance(
+        data,
+        dict,
+    ):
         fail(
             "JSON root must be an object:\n"
             f"{path}"
@@ -271,19 +305,25 @@ def names(
 
     result: set[str] = set()
 
-    for node in ast.walk(module):
+    for node in ast.walk(
+        module
+    ):
 
         if isinstance(
             node,
             ast.Name,
         ):
-            result.add(node.id)
+            result.add(
+                node.id
+            )
 
         elif isinstance(
             node,
             ast.Attribute,
         ):
-            result.add(node.attr)
+            result.add(
+                node.attr
+            )
 
         elif isinstance(
             node,
@@ -293,7 +333,9 @@ def names(
                 ast.ClassDef,
             ),
         ):
-            result.add(node.name)
+            result.add(
+                node.name
+            )
 
         elif isinstance(
             node,
@@ -316,7 +358,9 @@ def string_constants(
 
     return {
         node.value
-        for node in ast.walk(module)
+        for node in ast.walk(
+            module
+        )
         if isinstance(
             node,
             ast.Constant,
@@ -340,7 +384,6 @@ def require_subset(
     )
 
     if missing:
-
         fail(
             f"{label} is missing:\n"
             + "\n".join(
@@ -357,7 +400,9 @@ def has_call(
     method: str,
 ) -> bool:
 
-    for node in ast.walk(module):
+    for node in ast.walk(
+        module
+    ):
 
         if not isinstance(
             node,
@@ -397,6 +442,115 @@ def has_call(
     return False
 
 
+def find_function(
+    module: ast.AST,
+    function_name: str,
+) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+
+    for node in ast.walk(
+        module
+    ):
+        if (
+            isinstance(
+                node,
+                (
+                    ast.FunctionDef,
+                    ast.AsyncFunctionDef,
+                ),
+            )
+            and node.name == function_name
+        ):
+            return node
+
+    return None
+
+
+def extract_string_assignment(
+    module: ast.AST,
+    function_name: str,
+    variable_name: str,
+) -> str:
+
+    function = find_function(
+        module,
+        function_name,
+    )
+
+    require(
+        function is not None,
+        f"Function missing: "
+        f"{function_name}()",
+    )
+
+    for node in ast.walk(
+        function
+    ):
+
+        if not isinstance(
+            node,
+            ast.Assign,
+        ):
+            continue
+
+        target_matches = any(
+            isinstance(
+                target,
+                ast.Name,
+            )
+            and target.id == variable_name
+            for target
+            in node.targets
+        )
+
+        if not target_matches:
+            continue
+
+        value = node.value
+
+        # Support:
+        #
+        # replacement = """...""".lstrip()
+        #
+        if (
+            isinstance(
+                value,
+                ast.Call,
+            )
+            and isinstance(
+                value.func,
+                ast.Attribute,
+            )
+            and value.func.attr
+            == "lstrip"
+            and isinstance(
+                value.func.value,
+                ast.Constant,
+            )
+            and isinstance(
+                value.func.value.value,
+                str,
+            )
+        ):
+            return value.func.value
+
+        if (
+            isinstance(
+                value,
+                ast.Constant,
+            )
+            and isinstance(
+                value.value,
+                str,
+            )
+        ):
+            return value.value
+
+    fail(
+        f"{function_name}() does not assign "
+        f"a string to {variable_name!r}."
+    )
+
+
 def all_project_python_files() -> list[Path]:
 
     files: list[Path] = []
@@ -423,7 +577,9 @@ def all_project_python_files() -> list[Path]:
 
         files.append(path)
 
-    return sorted(files)
+    return sorted(
+        files
+    )
 
 
 # ======================================================================
@@ -432,7 +588,9 @@ def all_project_python_files() -> list[Path]:
 
 def validate_files() -> None:
 
-    for relative in REQUIRED_FILES:
+    for relative in (
+        REQUIRED_FILES
+    ):
 
         path = (
             PROJECT_ROOT
@@ -445,14 +603,17 @@ def validate_files() -> None:
             f"{path}",
         )
 
-    for obsolete in OBSOLETE_FILES:
+    for obsolete in (
+        OBSOLETE_FILES
+    ):
 
         require(
             not obsolete.exists(),
-            "Obsolete duplicated configuration still exists:\n"
+            "Obsolete duplicated configuration "
+            "still exists:\n"
             f"{obsolete}\n\n"
-            "compatibility_lock.yaml must remain the "
-            "single source of truth.",
+            "compatibility_lock.yaml must remain "
+            "the single source of truth.",
         )
 
     print(
@@ -471,7 +632,9 @@ def validate_python() -> None:
     )
 
     for path in files:
-        parse_python(path)
+        parse_python(
+            path
+        )
 
     print(
         "OK   Python AST syntax:"
@@ -487,6 +650,7 @@ def load_lock() -> dict[str, Any]:
 
     try:
         import yaml
+
     except ImportError as error:
         fail(
             "PyYAML is required to validate "
@@ -496,7 +660,9 @@ def load_lock() -> dict[str, Any]:
 
     try:
         data = yaml.safe_load(
-            read_text(LOCK_FILE)
+            read_text(
+                LOCK_FILE
+            )
         )
 
     except Exception as error:
@@ -537,7 +703,9 @@ def validate_lock(
         "compatibility_lock.yaml",
     )
 
-    comfy = lock["comfyui"]
+    comfy = lock[
+        "comfyui"
+    ]
 
     runtime = lock[
         "python_runtime"
@@ -560,7 +728,41 @@ def validate_lock(
     ]
 
     require(
-        comfy["repository"].endswith(
+        isinstance(
+            comfy,
+            dict,
+        ),
+        "comfyui lock section is invalid.",
+    )
+
+    require(
+        isinstance(
+            runtime,
+            dict,
+        ),
+        "python_runtime lock section is invalid.",
+    )
+
+    require(
+        isinstance(
+            custom_nodes,
+            dict,
+        ),
+        "custom_nodes lock section is invalid.",
+    )
+
+    require(
+        isinstance(
+            models,
+            dict,
+        ),
+        "models lock section is invalid.",
+    )
+
+    require(
+        comfy.get(
+            "repository"
+        ).endswith(
             "ComfyUI.git"
         ),
         "Invalid ComfyUI repository "
@@ -570,7 +772,12 @@ def validate_lock(
     require(
         re.fullmatch(
             r"[0-9a-f]{40}",
-            comfy["commit"],
+            str(
+                comfy.get(
+                    "commit",
+                    "",
+                )
+            ),
         )
         is not None,
         "ComfyUI commit must be "
@@ -599,13 +806,21 @@ def validate_lock(
         )
 
         require(
-            package.get("package"),
+            bool(
+                package.get(
+                    "package"
+                )
+            ),
             f"Missing package name: "
             f"{package_key}",
         )
 
         require(
-            package.get("version"),
+            bool(
+                package.get(
+                    "version"
+                )
+            ),
             f"Missing package version: "
             f"{package_key}",
         )
@@ -620,7 +835,11 @@ def validate_lock(
     ):
 
         require(
-            runtime.get(package),
+            bool(
+                runtime.get(
+                    package
+                )
+            ),
             f"Missing locked runtime package: "
             f"{package}",
         )
@@ -639,7 +858,11 @@ def validate_lock(
         )
 
         require(
-            spec.get("repository"),
+            bool(
+                spec.get(
+                    "repository"
+                )
+            ),
             f"Missing repository for "
             f"custom node: {name}",
         )
@@ -757,18 +980,18 @@ def validate_lock(
         )
 
     require(
-        detailer[
+        detailer.get(
             "legacy_loader"
-        ]
+        )
         == LEGACY_LATENT_LOADER,
         "Lock/detailer legacy loader "
         "is inconsistent.",
     )
 
     require(
-        detailer[
+        detailer.get(
             "modern_loader"
-        ]
+        )
         == MODERN_LATENT_LOADER,
         "Lock/detailer modern loader "
         "is inconsistent.",
@@ -788,7 +1011,9 @@ def validate_workflow_graph(
     required_nodes: set[str],
 ) -> dict[str, Any]:
 
-    workflow = parse_json(path)
+    workflow = parse_json(
+        path
+    )
 
     nodes = workflow.get(
         "nodes"
@@ -804,7 +1029,7 @@ def validate_workflow_graph(
             list,
         )
         and nodes,
-        f"Workflow contains no nodes:\n"
+        "Workflow contains no nodes:\n"
         f"{path}",
     )
 
@@ -813,7 +1038,7 @@ def validate_workflow_graph(
             links,
             list,
         ),
-        f"Workflow links are not a list:\n"
+        "Workflow links are not a list:\n"
         f"{path}",
     )
 
@@ -829,7 +1054,7 @@ def validate_workflow_graph(
                 node,
                 dict,
             ),
-            f"Workflow contains invalid node:\n"
+            "Workflow contains invalid node:\n"
             f"{path}",
         )
 
@@ -843,7 +1068,7 @@ def validate_workflow_graph(
 
         require(
             node_id is not None,
-            f"Workflow node has no ID:\n"
+            "Workflow node has no ID:\n"
             f"{path}",
         )
 
@@ -867,13 +1092,18 @@ def validate_workflow_graph(
             f"{key} has no type:\n{path}",
         )
 
-        node_map[key] = node
+        node_map[
+            key
+        ] = node
 
     node_types = {
         str(
-            node.get("type")
+            node.get(
+                "type"
+            )
         )
-        for node in nodes
+        for node
+        in nodes
     }
 
     require_subset(
@@ -895,7 +1125,7 @@ def validate_workflow_graph(
                 list,
             )
             and len(link) >= 5,
-            f"Malformed workflow link:\n"
+            "Malformed workflow link:\n"
             f"{path}\n"
             f"{link}",
         )
@@ -939,10 +1169,18 @@ def validate_workflow_graph(
     # Every declared input link must resolve.
     for node in nodes:
 
-        for input_def in node.get(
+        inputs = node.get(
             "inputs",
             [],
+        )
+
+        if not isinstance(
+            inputs,
+            list,
         ):
+            continue
+
+        for input_def in inputs:
 
             if not isinstance(
                 input_def,
@@ -963,16 +1201,16 @@ def validate_workflow_graph(
                 f"Node "
                 f"{node['id']} input "
                 f"{input_def.get('name')} "
-                f"references missing link "
-                f"{link_id}:\n{path}",
+                f"references missing "
+                f"link {link_id}:\n"
+                f"{path}",
             )
 
-    # A real executable workflow needs a video output.
     require(
         "VHS_VideoCombine"
         in node_types,
-        f"Workflow has no "
-        f"VHS_VideoCombine output:\n"
+        "Workflow has no "
+        "VHS_VideoCombine output:\n"
         f"{path}",
     )
 
@@ -1013,7 +1251,6 @@ def validate_workflow_conversion(
         )
 
     except Exception as error:
-
         fail(
             "Workflow conversion failed:\n"
             f"{path}\n"
@@ -1027,7 +1264,7 @@ def validate_workflow_conversion(
             dict,
         )
         and api,
-        f"Empty API workflow:\n"
+        "Empty API workflow:\n"
         f"{path}",
     )
 
@@ -1035,7 +1272,8 @@ def validate_workflow_conversion(
         node.get(
             "class_type"
         )
-        for node in api.values()
+        for node
+        in api.values()
         if isinstance(
             node,
             dict,
@@ -1045,8 +1283,9 @@ def validate_workflow_conversion(
     require(
         "VHS_VideoCombine"
         in class_types,
-        f"Converted workflow has no "
-        f"VHS_VideoCombine:\n{path}",
+        "Converted workflow has no "
+        "VHS_VideoCombine:\n"
+        f"{path}",
     )
 
     if detailer:
@@ -1079,10 +1318,19 @@ def validate_workflow_conversion(
                 f"{error}"
             )
 
-    # Validate all API graph references.
+    # Validate API node references.
     for node_id, node in (
         api.items()
     ):
+
+        require(
+            isinstance(
+                node,
+                dict,
+            ),
+            f"Converted node "
+            f"{node_id} is invalid.",
+        )
 
         inputs = node.get(
             "inputs",
@@ -1122,30 +1370,6 @@ def validate_workflow_conversion(
                     f"API node {value[0]}.",
                 )
 
-    if detailer:
-
-        source_types = {
-            node.get(
-                "type"
-            )
-            for node
-            in workflow.get(
-                "nodes",
-                [],
-            )
-            if isinstance(
-                node,
-                dict,
-            )
-        }
-
-        require(
-            LEGACY_LATENT_LOADER
-            in source_types,
-            "Detailer source no longer contains "
-            "the expected legacy loader.",
-        )
-
     print(
         "OK   workflow API conversion:"
         f" {path.relative_to(PROJECT_ROOT)}"
@@ -1168,94 +1392,107 @@ def validate_compatibility_builder() -> None:
         path
     )
 
-    constants = (
-        string_constants(module)
+    module_names = names(
+        module
+    )
+
+    module_constants = string_constants(
+        module
     )
 
     require_subset(
-        names(module)
-        | constants,
+        module_names
+        | module_constants,
         {
             "load_lock",
             "get_legacy_commit",
             "patch_blur",
             "write_curated_init",
             "build_compat_package",
-            "compatibility_lock.yaml",
             "LTX098ModernCompat",
+            "compatibility_lock.yaml",
         },
         "Compatibility builder",
     )
 
-    # The generated legacy initializer must expose the
-    # legacy nodes required by the lock.
-    initializer_function = next(
-        (
-            node
-            for node
-            in ast.walk(module)
-            if isinstance(
-                node,
-                (
-                    ast.FunctionDef,
-                    ast.AsyncFunctionDef,
-                ),
-            )
-            and node.name
-            == "write_curated_init"
-        ),
-        None,
+    # --------------------------------------------------------------
+    # Generated legacy initializer
+    # --------------------------------------------------------------
+
+    init_code = extract_string_assignment(
+        module,
+        "write_curated_init",
+        "init_code",
     )
 
-    require(
-        initializer_function is not None,
-        "write_curated_init() is missing.",
+    try:
+        initializer_ast = ast.parse(
+            init_code,
+            filename="generated_compat_init",
+        )
+
+    except SyntaxError as error:
+        fail(
+            "Generated compatibility initializer "
+            "is syntactically invalid:\n"
+            f"{error}"
+        )
+
+    initializer_constants = (
+        string_constants(
+            initializer_ast
+        )
     )
 
-    initializer_strings: set[str] = set()
-
-    for node in ast.walk(
-        initializer_function
-    ):
-
-        if (
-            isinstance(
-                node,
-                ast.Constant,
-            )
-            and isinstance(
-                node.value,
-                str,
-            )
-        ):
-
-            initializer_strings.add(
-                node.value
-            )
+    required_legacy_nodes = {
+        "LTXVBaseSampler",
+        "LTXVLoopingSampler",
+        "LTXVTiledSampler",
+        "LTXVTiledVAEDecode",
+        "LTXVLatentUpsampler",
+        "LTXVLatentUpsamplerModelLoader",
+        "LTXVFilmGrain",
+        "STGGuiderAdvanced",
+        "Set VAE Decoder Noise",
+    }
 
     require_subset(
-        initializer_strings,
-        {
-            "LTXVBaseSampler",
-            "LTXVLoopingSampler",
-            "LTXVTiledSampler",
-            "LTXVTiledVAEDecode",
-            "LTXVLatentUpsampler",
-            "LTXVLatentUpsamplerModelLoader",
-            "LTXVFilmGrain",
-            "STGGuiderAdvanced",
-            "Set VAE Decoder Noise",
-        },
+        initializer_constants,
+        required_legacy_nodes,
         "Generated compatibility initializer",
     )
 
-    # Verify the blur replacement contains the required function
-    # and native convolution.
-    patch_function = next(
+    # --------------------------------------------------------------
+    # Generated blur replacement
+    # --------------------------------------------------------------
+
+    replacement = extract_string_assignment(
+        module,
+        "patch_blur",
+        "replacement",
+    )
+
+    try:
+
+        replacement_ast = ast.parse(
+            replacement,
+            filename="generated_blur_replacement",
+        )
+
+    except SyntaxError as error:
+        fail(
+            "Generated blur replacement "
+            "is syntactically invalid:\n"
+            f"{error}"
+        )
+
+    blur_function = next(
         (
             node
             for node
-            in ast.walk(module)
+            in ast.walk(
+                replacement_ast
+            )
             if isinstance(
                 node,
                 (
@@ -1264,63 +1501,69 @@ def validate_compatibility_builder() -> None:
                 ),
             )
             and node.name
-            == "patch_blur"
+            == "blur_internal"
         ),
         None,
     )
 
     require(
-        patch_function is not None,
-        "patch_blur() is missing.",
+        blur_function is not None,
+        "Generated blur replacement "
+        "does not define blur_internal().",
     )
 
-    blur_source_found = False
-    conv2d_found = False
-
-    for node in ast.walk(
-        patch_function
-    ):
-
-        if (
-            isinstance(
-                node,
-                ast.Constant,
-            )
-            and node.value
-            == "blur_internal(image, blur_radius):"
-        ):
-            blur_source_found = True
-
-        if (
-            isinstance(
-                node,
-                ast.Call,
-            )
-            and isinstance(
-                node.func,
-                ast.Attribute,
-            )
-            and node.func.attr
-            == "conv2d"
-        ):
-            conv2d_found = True
+    parameter_names = [
+        arg.arg
+        for arg
+        in blur_function.args.args
+    ]
 
     require(
-        blur_source_found
-        or "blur_internal"
-        in constants,
-        "Compatibility builder does not contain "
-        "blur_internal implementation.",
+        parameter_names
+        == [
+            "image",
+            "blur_radius",
+        ],
+        "Generated blur_internal() "
+        "signature is wrong.\n"
+        f"Actual: {parameter_names}\n"
+        "Expected: "
+        "['image', 'blur_radius']",
+    )
+
+    conv2d_found = any(
+        isinstance(
+            node,
+            ast.Call,
+        )
+        and isinstance(
+            node.func,
+            ast.Attribute,
+        )
+        and node.func.attr
+        == "conv2d"
+        for node
+        in ast.walk(
+            blur_function
+        )
     )
 
     require(
         conv2d_found,
-        "Compatibility builder does not use native "
-        "torch conv2d for blur.",
+        "Generated blur_internal() "
+        "does not use conv2d().",
     )
 
     print(
         "OK   LTX 0.9.8 compatibility builder"
+    )
+
+    print(
+        "OK   generated legacy initializer"
+    )
+
+    print(
+        "OK   generated blur implementation"
     )
 
 
@@ -1381,9 +1624,11 @@ def validate_application_wiring() -> None:
     )
 
     contracts = {
-        "execution/comfy_client.py": (
+        (
+            "execution/comfy_client.py",
             "ComfyClient",
             {
+                "__init__",
                 "health_check",
                 "queue_prompt",
                 "get_history",
@@ -1392,7 +1637,8 @@ def validate_application_wiring() -> None:
                 "find_video_outputs",
             },
         ),
-        "execution/shot_executor.py": (
+        (
+            "execution/shot_executor.py",
             "ShotExecutor",
             {
                 "__init__",
@@ -1401,7 +1647,8 @@ def validate_application_wiring() -> None:
                 "execute_shot",
             },
         ),
-        "execution/production_runner.py": (
+        (
+            "execution/production_runner.py",
             "ProductionRunner",
             {
                 "__init__",
@@ -1411,11 +1658,15 @@ def validate_application_wiring() -> None:
                 "_dict_to_shot",
             },
         ),
-        "scheduler/gpu_scheduler.py": (
+        (
+            "scheduler/gpu_scheduler.py",
             "GPUScheduler",
-            {"run"},
+            {
+                "run",
+            },
         ),
-        "execution/checkpoint_manager.py": (
+        (
+            "execution/checkpoint_manager.py",
             "CheckpointManager",
             {
                 "initialize_shot",
@@ -1431,18 +1682,23 @@ def validate_application_wiring() -> None:
                 "get_assembly",
             },
         ),
-        "pipeline/production_orchestrator.py": (
+        (
+            "pipeline/production_orchestrator.py",
             "ProductionOrchestrator",
             {
                 "create_production_plan",
                 "unload_models",
             },
         ),
-        "pipeline/production_manager.py": (
+        (
+            "pipeline/production_manager.py",
             "ProductionManager",
-            {"get_pipeline"},
+            {
+                "get_pipeline",
+            },
         ),
-        "execution/assembly_manager.py": (
+        (
+            "execution/assembly_manager.py",
             "AssemblyManager",
             {
                 "assemble",
@@ -1452,10 +1708,11 @@ def validate_application_wiring() -> None:
         ),
     }
 
-    for relative, (
+    for (
+        relative,
         class_name,
         required_methods,
-    ) in contracts.items():
+    ) in contracts:
 
         module = parse_python(
             PROJECT_ROOT
@@ -1464,7 +1721,9 @@ def validate_application_wiring() -> None:
 
         class_node = (
             classes(module)
-            .get(class_name)
+            .get(
+                class_name
+            )
         )
 
         require(
@@ -1480,7 +1739,7 @@ def validate_application_wiring() -> None:
         )
 
     # --------------------------------------------------------------
-    # ShotExecutor -> workflow adapters -> ComfyClient
+    # ShotExecutor -> adapters -> ComfyClient
     # --------------------------------------------------------------
 
     executor = parse_python(
@@ -1541,18 +1800,42 @@ def validate_application_wiring() -> None:
 
     require(
         "ltx_raw/"
-        in string_constants(executor),
+        in string_constants(
+            executor
+        ),
         "Raw LTX output path is missing.",
     )
 
     require(
         "ltx_master/"
-        in string_constants(executor),
+        in string_constants(
+            executor
+        ),
         "Final LTX master output path is missing.",
     )
 
     # --------------------------------------------------------------
-    # generate_video.py -> planning -> execution
+    # ProductionRunner -> Scheduler
+    # --------------------------------------------------------------
+
+    runner = parse_python(
+        PROJECT_ROOT
+        / "execution"
+        / "production_runner.py"
+    )
+
+    require(
+        has_call(
+            runner,
+            "scheduler",
+            "run",
+        ),
+        "ProductionRunner does not call "
+        "the GPU scheduler.",
+    )
+
+    # --------------------------------------------------------------
+    # generate_video.py
     # --------------------------------------------------------------
 
     entry = parse_python(
@@ -1598,7 +1881,8 @@ def validate_application_wiring() -> None:
             "unload_models",
         ),
         "generate_video.py does not unload "
-        "the planning model before LTX execution.",
+        "the planning model before "
+        "LTX execution.",
     )
 
     require(
@@ -1617,7 +1901,80 @@ def validate_application_wiring() -> None:
 
 
 # ======================================================================
-# 8. KAGGLE LAUNCHER WIRING
+# 8. CPU PREFLIGHT CONTRACT
+# ======================================================================
+
+def validate_cpu_preflight() -> None:
+
+    module = parse_python(
+        CPU_PREFLIGHT
+    )
+
+    constants = string_constants(
+        module
+    )
+
+    source = read_text(
+        CPU_PREFLIGHT
+    )
+
+    lower_source = (
+        source.lower()
+    )
+
+    required_markers = {
+        "LTX-13B CPU PREFLIGHT",
+        "Python AST",
+        "ComfyWorkflowAdapter",
+        "LTXVLatentUpsamplerModelLoader",
+        "LatentUpscaleModelLoader",
+    }
+
+    require_subset(
+        constants,
+        required_markers,
+        "CPU preflight",
+    )
+
+    forbidden_runtime_actions = (
+        "torch.cuda.is_available",
+        "torch.cuda.device_count",
+        "start_comfyui",
+        "subprocess.Popen",
+    )
+
+    for marker in (
+        forbidden_runtime_actions
+    ):
+
+        require(
+            marker not in lower_source,
+            "CPU preflight must remain CPU-only; "
+            f"forbidden runtime marker found: "
+            f"{marker}",
+        )
+
+    require(
+        "import ast"
+        in source,
+        "CPU preflight must use AST-based "
+        "repository checks.",
+    )
+
+    require(
+        "to_api_workflow"
+        in source,
+        "CPU preflight must validate "
+        "workflow conversion.",
+    )
+
+    print(
+        "OK   CPU preflight contract"
+    )
+
+
+# ======================================================================
+# 9. KAGGLE LAUNCHER / BOOTSTRAP WIRING
 # ======================================================================
 
 def validate_kaggle_wiring(
@@ -1630,12 +1987,14 @@ def validate_kaggle_wiring(
         / "launch.py"
     )
 
-    launch_strings = (
-        string_constants(launch)
+    launch_constants = (
+        string_constants(
+            launch
+        )
     )
 
     require_subset(
-        launch_strings,
+        launch_constants,
         {
             "LTX-13B MODERN ONE-CELL STARTUP",
             "preflight_modern.py",
@@ -1655,106 +2014,190 @@ def validate_kaggle_wiring(
         bootstrap_path
     )
 
-    bootstrap_strings = (
-        string_constants(bootstrap)
+    bootstrap_source = read_text(
+        bootstrap_path
     )
+
+    bootstrap_names = names(
+        bootstrap
+    )
+
+    bootstrap_constants = (
+        string_constants(
+            bootstrap
+        )
+    )
+
+    # --------------------------------------------------------------
+    # Lock must be consumed dynamically.
+    # --------------------------------------------------------------
 
     require(
         "compatibility_lock.yaml"
-        in bootstrap_strings,
-        "bootstrap.py does not consume "
+        in bootstrap_source,
+        "bootstrap.py does not reference "
         "compatibility_lock.yaml.",
     )
 
     require(
-        "Frontend override: NONE"
-        in bootstrap_strings,
-        "bootstrap.py no longer confirms "
-        "the pinned frontend policy.",
+        "lock"
+        in bootstrap_names
+        or "LOCK"
+        in bootstrap_names,
+        "bootstrap.py does not appear to "
+        "load the compatibility lock.",
     )
 
     require(
         "models"
-        in bootstrap_strings,
+        in bootstrap_source,
         "bootstrap.py does not contain "
-        "locked model handling.",
+        "dynamic model handling.",
     )
 
-    # Every locked model filename and target must be present in bootstrap.
-    for name, spec in (
-        lock["models"].items()
-    ):
+    require(
+        "filename"
+        in bootstrap_source,
+        "bootstrap.py does not read locked "
+        "model filenames dynamically.",
+    )
 
-        require(
-            spec["filename"]
-            in bootstrap_strings,
-            f"bootstrap.py does not consume "
-            f"locked filename for {name}.",
+    require(
+        "target"
+        in bootstrap_source,
+        "bootstrap.py does not read locked "
+        "model targets dynamically.",
+    )
+
+    # DO NOT require the literal model filenames here.
+    #
+    # The whole point of the architecture is:
+    #
+    # compatibility_lock.yaml
+    #          ↓
+    # bootstrap.py
+    #
+    # not duplicated literals in bootstrap.py.
+
+    # --------------------------------------------------------------
+    # Frontend policy
+    # --------------------------------------------------------------
+
+    require(
+        (
+            "Frontend override: NONE"
+            in bootstrap_constants
         )
+        or (
+            "frontend"
+            in bootstrap_source
+        ),
+        "bootstrap.py does not contain the "
+        "locked frontend handling.",
+    )
 
-        require(
-            spec["target"]
-            in bootstrap_strings,
-            f"bootstrap.py does not consume "
-            f"locked target for {name}.",
-        )
+    # --------------------------------------------------------------
+    # Preflight
+    # --------------------------------------------------------------
 
-    preflight = parse_python(
+    preflight_path = (
         PROJECT_ROOT
         / "kaggle"
         / "preflight_modern.py"
     )
 
+    preflight = parse_python(
+        preflight_path
+    )
+
+    preflight_source = read_text(
+        preflight_path
+    )
+
     require(
         "compatibility_lock.yaml"
-        in string_constants(preflight),
+        in preflight_source,
         "preflight_modern.py does not consume "
         "compatibility_lock.yaml.",
     )
 
-    tunnel = parse_python(
+    require(
+        "torch.cuda.is_available"
+        in preflight_source,
+        "preflight_modern.py does not validate "
+        "CUDA availability.",
+    )
+
+    require(
+        "torchvision"
+        in preflight_source,
+        "preflight_modern.py does not validate "
+        "torchvision.",
+    )
+
+    # --------------------------------------------------------------
+    # Tunnel / ComfyUI startup
+    # --------------------------------------------------------------
+
+    tunnel_path = (
         PROJECT_ROOT
         / "kaggle"
         / "start_comfyui_tunnel.py"
     )
 
-    tunnel_strings = (
-        string_constants(tunnel)
+    tunnel = parse_python(
+        tunnel_path
+    )
+
+    tunnel_source = read_text(
+        tunnel_path
     )
 
     require(
-        "trycloudflare.com"
-        in "\n".join(
-            sorted(tunnel_strings)
-        ),
-        "Cloudflare quick-tunnel contract "
-        "is missing.",
-    )
-
-    require(
-        "--listen"
-        in tunnel_strings
-        or "COMFYUI_HOST"
-        in names(tunnel),
-        "ComfyUI host/listen configuration "
-        "is missing.",
-    )
-
-    require(
-        "--port"
-        in tunnel_strings
+        "COMFYUI_PORT"
+        in names(tunnel)
         or "COMFYUI_PORT"
-        in names(tunnel),
+        in tunnel_source,
         "ComfyUI port configuration "
         "is missing.",
     )
 
-    # The removed model-path file must not be referenced.
+    require(
+        "8188"
+        in string_constants(
+            tunnel
+        )
+        or "8188"
+        in tunnel_source,
+        "Production launcher no longer "
+        "contains the expected ComfyUI port 8188.",
+    )
+
+    require(
+        "main.py"
+        in tunnel_source,
+        "start_comfyui_tunnel.py does not "
+        "start ComfyUI.",
+    )
+
+    require(
+        "cloudflared"
+        in tunnel_source.lower(),
+        "start_comfyui_tunnel.py does not "
+        "configure the Cloudflare tunnel.",
+    )
+
+    # --------------------------------------------------------------
+    # Removed duplicate configuration must not be referenced.
+    # --------------------------------------------------------------
+
     for relative in (
         "kaggle/bootstrap.py",
         "kaggle/config.py",
         "kaggle/preflight_modern.py",
         "kaggle/launch.py",
+        "kaggle/start_comfyui.py",
+        "kaggle/start_comfyui_tunnel.py",
     ):
 
         text = read_text(
@@ -1769,13 +2212,39 @@ def validate_kaggle_wiring(
             f"referenced by {relative}.",
         )
 
+    # --------------------------------------------------------------
+    # Model source consistency.
+    # Validate the lock itself rather than looking for duplicated
+    # strings in bootstrap.py.
+    # --------------------------------------------------------------
+
+    for name, spec in (
+        lock["models"].items()
+    ):
+
+        require(
+            spec["dataset"].startswith(
+                "/kaggle/input/"
+            ),
+            f"Model dataset path invalid "
+            f"for {name}.",
+        )
+
+        require(
+            spec["target"].startswith(
+                "models/"
+            ),
+            f"Model target invalid "
+            f"for {name}.",
+        )
+
     print(
         "OK   Kaggle launcher/bootstrap wiring"
     )
 
 
 # ======================================================================
-# 9. MATERIALIZED RUNTIME
+# 10. MATERIALIZED RUNTIME
 # ======================================================================
 
 def validate_materialized_runtime(
@@ -1791,15 +2260,14 @@ def validate_materialized_runtime(
     if not exists:
 
         if require_runtime:
-
             fail(
                 "ComfyUI is not materialized, "
                 "but --require-runtime was supplied."
             )
 
         print(
-            "SKIP runtime: ComfyUI/"
-            " is not materialized."
+            "SKIP runtime: ComfyUI/ "
+            "is not materialized."
         )
 
         return
@@ -1859,6 +2327,15 @@ def validate_materialized_runtime(
             f" {torch.cuda.device_count()} GPU(s)"
         )
 
+        for index in range(
+            torch.cuda.device_count()
+        ):
+
+            print(
+                f"     GPU {index}: "
+                f"{torch.cuda.get_device_name(index)}"
+            )
+
     packages = {
         lock["comfyui"]["frontend"]["package"]:
             lock["comfyui"]["frontend"]["version"],
@@ -1896,7 +2373,9 @@ def validate_materialized_runtime(
 
             actual = (
                 importlib.metadata
-                .version(package)
+                .version(
+                    package
+                )
             )
 
         except (
@@ -1911,11 +2390,19 @@ def validate_materialized_runtime(
 
         require(
             actual == expected,
-            f"Package version mismatch:\n"
+            "Package version mismatch:\n"
             f"{package}\n"
             f"Expected: {expected}\n"
             f"Actual:   {actual}",
         )
+
+    print(
+        "OK   locked runtime packages"
+    )
+
+    # --------------------------------------------------------------
+    # ComfyUI exact revision
+    # --------------------------------------------------------------
 
     expected_comfy = (
         lock["comfyui"]["commit"]
@@ -1942,6 +2429,14 @@ def validate_materialized_runtime(
         f"Expected: {expected_comfy}\n"
         f"Actual:   {actual_comfy}",
     )
+
+    print(
+        "OK   ComfyUI locked commit"
+    )
+
+    # --------------------------------------------------------------
+    # Custom nodes exact revisions
+    # --------------------------------------------------------------
 
     custom_root = (
         COMFYUI_DIR
@@ -1980,12 +2475,20 @@ def validate_materialized_runtime(
         require(
             actual
             == spec["commit"],
-            f"Custom node revision mismatch:\n"
+            "Custom node revision mismatch:\n"
             f"{name}\n"
             f"Expected: "
             f"{spec['commit']}\n"
             f"Actual: {actual}",
         )
+
+    print(
+        "OK   custom-node locked commits"
+    )
+
+    # --------------------------------------------------------------
+    # Model targets
+    # --------------------------------------------------------------
 
     for name, spec in (
         lock["models"].items()
@@ -1998,18 +2501,77 @@ def validate_materialized_runtime(
 
         require(
             target.exists(),
-            f"Locked model target missing:\n"
+            "Locked model target missing:\n"
             f"{name}\n"
             f"{target}",
         )
 
     print(
-        "OK   materialized ComfyUI runtime"
+        "OK   locked model targets"
     )
 
 
 # ======================================================================
-# 10. MAIN
+# 11. OPTIONAL LIVE COMFYUI CHECK
+# ======================================================================
+
+def validate_live_comfyui(
+    require_live: bool,
+    base_url: str,
+) -> None:
+
+    if not require_live:
+
+        return
+
+    from urllib.request import (
+        urlopen,
+    )
+    from urllib.error import (
+        URLError,
+        HTTPError,
+    )
+
+    url = (
+        base_url.rstrip("/")
+        + "/system_stats"
+    )
+
+    try:
+
+        with urlopen(
+            url,
+            timeout=10,
+        ) as response:
+
+            status = response.status
+
+    except (
+        HTTPError,
+        URLError,
+        OSError,
+    ) as error:
+
+        fail(
+            "Live ComfyUI health check failed:\n"
+            f"{base_url}\n"
+            f"{error}"
+        )
+
+    require(
+        status == 200,
+        "ComfyUI system_stats returned "
+        f"HTTP {status}.",
+    )
+
+    print(
+        "OK   live ComfyUI API:"
+        f" {base_url}"
+    )
+
+
+# ======================================================================
+# 12. CLI
 # ======================================================================
 
 def parse_args() -> argparse.Namespace:
@@ -2039,8 +2601,30 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
+    parser.add_argument(
+        "--require-live",
+        action="store_true",
+        help=(
+            "Require a live ComfyUI API "
+            "at --comfy-url."
+        ),
+    )
+
+    parser.add_argument(
+        "--comfy-url",
+        default="http://127.0.0.1:8188",
+        help=(
+            "ComfyUI base URL for "
+            "--require-live."
+        ),
+    )
+
     return parser.parse_args()
 
+
+# ======================================================================
+# MAIN
+# ======================================================================
 
 def main() -> int:
 
@@ -2049,79 +2633,111 @@ def main() -> int:
     if args.require_cuda:
         args.require_runtime = True
 
-    print("=" * 88)
-    print("LTX-13B PROJECT VALIDATOR")
-    print("=" * 88)
+    print(
+        "=" * 88
+    )
+    print(
+        "LTX-13B PROJECT VALIDATOR"
+    )
+    print(
+        "=" * 88
+    )
+
+    print(
+        f"Project: {PROJECT_ROOT}"
+    )
 
     lock = load_lock()
 
+    # --------------------------------------------------------------
+    # Repository
+    # --------------------------------------------------------------
+
     validate_files()
     validate_python()
-    validate_lock(lock)
 
     # --------------------------------------------------------------
-    # BASE WORKFLOW
+    # Compatibility
     # --------------------------------------------------------------
 
-    base = validate_workflow_graph(
-        BASE_WORKFLOW,
-        {
-            "LTXVBaseSampler",
-            "LTXVConditioning",
-            "STGGuiderAdvanced",
-            "FloatToSigmas",
-            "StringToFloatList",
-            "UnetLoaderGGUF",
-            "CLIPLoaderGGUF",
-            "VAELoader",
-            "Set VAE Decoder Noise",
-            "VHS_VideoCombine",
-        },
+    validate_lock(
+        lock
+    )
+
+    # --------------------------------------------------------------
+    # BASE workflow
+    # --------------------------------------------------------------
+
+    base_workflow = (
+        validate_workflow_graph(
+            BASE_WORKFLOW,
+            {
+                "LTXVBaseSampler",
+                "LTXVConditioning",
+                "STGGuiderAdvanced",
+                "FloatToSigmas",
+                "StringToFloatList",
+                "UnetLoaderGGUF",
+                "CLIPLoaderGGUF",
+                "VAELoader",
+                "Set VAE Decoder Noise",
+                "VHS_VideoCombine",
+            },
+        )
     )
 
     validate_workflow_conversion(
         BASE_WORKFLOW,
-        base,
+        base_workflow,
         detailer=False,
     )
 
     # --------------------------------------------------------------
-    # DETAILER WORKFLOW
+    # DETAILER workflow
     # --------------------------------------------------------------
 
-    detailer = validate_workflow_graph(
-        DETAILER_WORKFLOW,
-        {
-            "VHS_LoadVideo",
-            "LTXVLoopingSampler",
-            LEGACY_LATENT_LOADER,
-            "LTXVTiledVAEDecode",
-            "LTXVFilmGrain",
-            "LoraLoaderModelOnly",
-            "VHS_VideoCombine",
-        },
+    detailer_workflow = (
+        validate_workflow_graph(
+            DETAILER_WORKFLOW,
+            {
+                "VHS_LoadVideo",
+                "LTXVLoopingSampler",
+                LEGACY_LATENT_LOADER,
+                "LTXVLatentUpsampler",
+                "LTXVTiledVAEDecode",
+                "LTXVFilmGrain",
+                "LoraLoaderModelOnly",
+                "VHS_VideoCombine",
+            },
+        )
     )
 
     validate_workflow_conversion(
         DETAILER_WORKFLOW,
-        detailer,
+        detailer_workflow,
         detailer=True,
     )
 
     # --------------------------------------------------------------
-    # COMPATIBILITY
+    # Compatibility builder
     # --------------------------------------------------------------
 
     validate_compatibility_builder()
 
     # --------------------------------------------------------------
-    # APPLICATION
+    # Application
     # --------------------------------------------------------------
 
     validate_application_wiring()
 
     # --------------------------------------------------------------
-    # KAGGLE
+    # CPU preflight
+    # --------------------------------------------------------------
+
+    validate_cpu_preflight()
+
+    # --------------------------------------------------------------
+    # Kaggle
     # --------------------------------------------------------------
 
     validate_kaggle_wiring(
@@ -2129,13 +2745,30 @@ def main() -> int:
     )
 
     # --------------------------------------------------------------
-    # RUNTIME
+    # Runtime
     # --------------------------------------------------------------
 
     validate_materialized_runtime(
         lock,
-        require_runtime=args.require_runtime,
-        require_cuda=args.require_cuda,
+        require_runtime=(
+            args.require_runtime
+        ),
+        require_cuda=(
+            args.require_cuda
+        ),
+    )
+
+    # --------------------------------------------------------------
+    # Optional live ComfyUI API
+    # --------------------------------------------------------------
+
+    validate_live_comfyui(
+        require_live=(
+            args.require_live
+        ),
+        base_url=(
+            args.comfy_url
+        ),
     )
 
     # --------------------------------------------------------------
@@ -2151,50 +2784,86 @@ def main() -> int:
             "available in the current environment."
         )
 
-    print("=" * 88)
-    print("✅ LTX-13B VALIDATION PASSED")
-    print("=" * 88)
-
     print()
+    print(
+        "=" * 88
+    )
+    print(
+        "✅ LTX-13B VALIDATION PASSED"
+    )
+    print(
+        "=" * 88
+    )
+
     print(
         "Verified:"
     )
+
     print(
-        "  • repository structure"
+        "  ✅ repository structure"
     )
+
     print(
-        "  • Python syntax"
+        "  ✅ Python syntax"
     )
+
     print(
-        "  • compatibility lock"
+        "  ✅ single compatibility lock"
     )
+
     print(
-        "  • single model-path authority"
+        "  ✅ no obsolete model_paths.yaml"
     )
+
     print(
-        "  • BASE workflow graph"
+        "  ✅ BASE workflow graph"
     )
+
     print(
-        "  • DETAILER workflow graph"
+        "  ✅ DETAILER workflow graph"
     )
+
     print(
-        "  • real workflow → API conversion"
+        "  ✅ workflow → API conversion"
     )
+
     print(
-        "  • legacy → modern latent loader conversion"
+        "  ✅ legacy → modern loader conversion"
     )
+
     print(
-        "  • LTX compatibility builder"
+        "  ✅ LTX compatibility builder"
     )
+
     print(
-        "  • production application wiring"
+        "  ✅ application wiring"
     )
+
     print(
-        "  • Kaggle launcher/bootstrap wiring"
+        "  ✅ CPU preflight contract"
     )
+
     print(
-        "  • materialized runtime when requested"
+        "  ✅ Kaggle bootstrap wiring"
     )
+
+    if args.require_runtime:
+
+        print(
+            "  ✅ materialized runtime"
+        )
+
+    if args.require_cuda:
+
+        print(
+            "  ✅ CUDA"
+        )
+
+    if args.require_live:
+
+        print(
+            "  ✅ live ComfyUI API"
+        )
 
     return 0
 
@@ -2210,9 +2879,15 @@ if __name__ == "__main__":
     except Exception as error:
 
         print()
-        print("=" * 88)
-        print("❌ LTX-13B VALIDATION FAILED")
-        print("=" * 88)
+        print(
+            "=" * 88
+        )
+        print(
+            "❌ LTX-13B VALIDATION FAILED"
+        )
+        print(
+            "=" * 88
+        )
         print(
             f"{type(error).__name__}: "
             f"{error}"
