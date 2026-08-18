@@ -1,19 +1,5 @@
-"""
-Start ComfyUI on Kaggle and expose it through a temporary
-Cloudflare Quick Tunnel.
+from __future__ import annotations
 
-Flow:
-
-    ComfyUI
-       ↓
-    localhost:8188
-       ↓
-    cloudflared
-       ↓
-    https://xxxx.trycloudflare.com
-"""
-
-from pathlib import Path
 import os
 import queue
 import re
@@ -23,18 +9,20 @@ import sys
 import threading
 import time
 import urllib.request
+from pathlib import Path
 
 
-# ============================================================
-# PATHS
-# ============================================================
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = (
+    Path(__file__).resolve().parents[1]
+)
 
 COMFYUI_DIR = Path(
     os.getenv(
         "COMFYUI_DIR",
-        str(PROJECT_ROOT / "ComfyUI"),
+        str(
+            PROJECT_ROOT
+            / "ComfyUI"
+        ),
     )
 )
 
@@ -51,76 +39,53 @@ PORT = int(
 )
 
 CLOUDFLARED_PATH = (
-    PROJECT_ROOT / "cloudflared"
+    PROJECT_ROOT
+    / "cloudflared"
 )
 
 CLOUDFLARED_URL = (
     "https://github.com/cloudflare/"
-    "cloudflared/releases/latest/download/"
-    "cloudflared-linux-amd64"
+    "cloudflared/releases/latest/"
+    "download/cloudflared-linux-amd64"
 )
 
-
-# ============================================================
-# CLOUDFLARE URL DETECTION
-# ============================================================
-
-TUNNEL_URL_PATTERN = re.compile(
+URL_PATTERN = re.compile(
     r"https://[a-zA-Z0-9-]+\.trycloudflare\.com"
 )
 
 
-# ============================================================
-# PROCESS OUTPUT
-# ============================================================
-
-def stream_output(
+def stream(
     process,
     prefix,
     output_queue=None,
 ):
-    """
-    Continuously read subprocess output so the child process
-    does not block because its stdout pipe becomes full.
-    """
 
     if process.stdout is None:
         return
 
-    try:
-        for line in iter(
-            process.stdout.readline,
-            "",
-        ):
-            if not line:
-                break
+    for line in iter(
+        process.stdout.readline,
+        "",
+    ):
 
-            line = line.rstrip()
+        if not line:
+            break
 
-            if output_queue is not None:
-                output_queue.put(line)
+        line = line.rstrip()
 
-            print(
-                f"{prefix} {line}",
-                flush=True,
+        if output_queue is not None:
+
+            output_queue.put(
+                line
             )
 
-    except Exception as exc:
         print(
-            f"{prefix} output error: {exc}",
+            f"{prefix} {line}",
             flush=True,
         )
 
 
-# ============================================================
-# CLOUDFLARED
-# ============================================================
-
 def ensure_cloudflared():
-    """
-    Download cloudflared if necessary and always restore its
-    executable permission.
-    """
 
     if not CLOUDFLARED_PATH.exists():
 
@@ -133,62 +98,28 @@ def ensure_cloudflared():
             CLOUDFLARED_PATH,
         )
 
-        print(
-            "✅ cloudflared downloaded"
-        )
-
-    # Kaggle may preserve the file but not its executable bit.
     os.chmod(
         CLOUDFLARED_PATH,
         0o755,
     )
 
-    if not os.access(
-        CLOUDFLARED_PATH,
-        os.X_OK,
-    ):
-        raise RuntimeError(
-            "cloudflared exists but is not executable:\n"
-            f"{CLOUDFLARED_PATH}"
-        )
-
-    print(
-        "✅ cloudflared executable:"
-    )
-    print(
-        f"   {CLOUDFLARED_PATH}"
-    )
-
-
-# ============================================================
-# COMFYUI
-# ============================================================
-
-def verify_comfyui():
-    """
-    Verify that the ComfyUI installation exists.
-    """
-
-    main_py = (
-        COMFYUI_DIR / "main.py"
-    )
-
-    if not main_py.exists():
-
-        raise FileNotFoundError(
-            "ComfyUI was not found at:\n"
-            f"{COMFYUI_DIR}\n\n"
-            "Run the project bootstrap first."
-        )
-
 
 def start_comfyui():
-    """
-    Start ComfyUI in the background.
-    """
 
-    verify_comfyui()
+    if not (
+        COMFYUI_DIR
+        / "main.py"
+    ).exists():
 
+        raise FileNotFoundError(
+            f"ComfyUI not found:\n"
+            f"{COMFYUI_DIR}"
+        )
+
+    # IMPORTANT:
+    # Do not pass --front-end-version @latest.
+    # The exact frontend package has already been pinned
+    # by the modern v0.33.1 requirements.
     command = [
         sys.executable,
         "main.py",
@@ -196,19 +127,7 @@ def start_comfyui():
         HOST,
         "--port",
         str(PORT),
-        "--front-end-version",
-        "Comfy-Org/ComfyUI_frontend@latest",
     ]
-
-    print()
-    print("=" * 70)
-    print("STARTING COMFYUI")
-    print("=" * 70)
-
-    print(
-        "Command:",
-        " ".join(command),
-    )
 
     process = subprocess.Popen(
         command,
@@ -219,38 +138,30 @@ def start_comfyui():
         bufsize=1,
     )
 
-    thread = threading.Thread(
-        target=stream_output,
+    threading.Thread(
+        target=stream,
         args=(
             process,
             "[ComfyUI]",
         ),
         daemon=True,
-    )
-
-    thread.start()
+    ).start()
 
     return process
 
 
-# ============================================================
-# PORT CHECK
-# ============================================================
-
-def port_is_open(
-    host="127.0.0.1",
-    port=8188,
-):
-    """
-    Check whether a TCP server is accepting connections.
-    """
+def port_open():
 
     try:
 
         with socket.create_connection(
-            (host, port),
+            (
+                "127.0.0.1",
+                PORT,
+            ),
             timeout=1,
         ):
+
             return True
 
     except OSError:
@@ -258,159 +169,116 @@ def port_is_open(
         return False
 
 
-# ============================================================
-# WAIT FOR COMFYUI
-# ============================================================
-
 def wait_for_comfyui(
     process,
     timeout=180,
 ):
-    """
-    Wait until ComfyUI is actually listening on its TCP port.
 
-    This is more reliable than depending on a specific startup
-    log message.
-    """
-
-    print()
-    print(
-        "Waiting for ComfyUI to become ready..."
-    )
-
-    start_time = time.time()
+    start = time.time()
 
     while (
-        time.time() - start_time
+        time.time()
+        - start
         < timeout
     ):
 
-        return_code = process.poll()
-
-        if return_code is not None:
+        if process.poll() is not None:
 
             raise RuntimeError(
-                "ComfyUI exited before becoming ready.\n"
-                f"Exit code: {return_code}"
+                "ComfyUI exited with code "
+                f"{process.returncode}"
             )
 
-        if port_is_open(
-            "127.0.0.1",
-            PORT,
-        ):
+        if port_open():
 
-            print()
             print(
-                "✅ ComfyUI is listening on "
-                f"port {PORT}"
+                f"✅ ComfyUI ready on port "
+                f"{PORT}"
             )
 
             return
 
-        time.sleep(1)
+        time.sleep(
+            1
+        )
 
     raise TimeoutError(
-        "ComfyUI did not start within "
-        f"{timeout} seconds."
+        "ComfyUI did not become ready "
+        f"within {timeout}s."
     )
 
-
-# ============================================================
-# CLOUDFLARE TUNNEL
-# ============================================================
 
 def start_tunnel():
-    """
-    Start a Cloudflare Quick Tunnel pointing at ComfyUI.
-    """
-
-    command = [
-        str(CLOUDFLARED_PATH),
-        "tunnel",
-        "--url",
-        f"http://127.0.0.1:{PORT}",
-    ]
-
-    print()
-    print("=" * 70)
-    print("STARTING CLOUDFLARE QUICK TUNNEL")
-    print("=" * 70)
-
-    print(
-        "Command:",
-        " ".join(command),
-    )
 
     process = subprocess.Popen(
-        command,
+        [
+            str(
+                CLOUDFLARED_PATH
+            ),
+            "tunnel",
+            "--url",
+            f"http://127.0.0.1:{PORT}",
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
     )
 
-    output_queue = queue.Queue()
+    output_queue = (
+        queue.Queue()
+    )
 
-    thread = threading.Thread(
-        target=stream_output,
+    threading.Thread(
+        target=stream,
         args=(
             process,
             "[Tunnel]",
             output_queue,
         ),
         daemon=True,
+    ).start()
+
+    return (
+        process,
+        output_queue,
     )
 
-    thread.start()
 
-    return process, output_queue
-
-
-# ============================================================
-# WAIT FOR TUNNEL URL
-# ============================================================
-
-def wait_for_tunnel_url(
-    tunnel_process,
+def wait_for_url(
+    process,
     output_queue,
     timeout=60,
 ):
-    """
-    Wait for cloudflared to print its public URL.
-    """
 
-    print()
-    print(
-        "Waiting for Cloudflare tunnel URL..."
-    )
-
-    start_time = time.time()
+    start = time.time()
 
     while (
-        time.time() - start_time
+        time.time()
+        - start
         < timeout
     ):
 
-        if tunnel_process.poll() is not None:
+        if process.poll() is not None:
 
             raise RuntimeError(
-                "cloudflared exited before "
-                "providing a tunnel URL.\n"
-                f"Exit code: "
-                f"{tunnel_process.returncode}"
+                "Cloudflare tunnel exited "
+                "before providing a URL."
             )
 
         try:
 
-            line = output_queue.get(
-                timeout=1
+            line = (
+                output_queue.get(
+                    timeout=1
+                )
             )
 
         except queue.Empty:
 
             continue
 
-        match = TUNNEL_URL_PATTERN.search(
+        match = URL_PATTERN.search(
             line
         )
 
@@ -419,196 +287,122 @@ def wait_for_tunnel_url(
             return match.group(0)
 
     raise TimeoutError(
-        "Cloudflare did not provide a "
-        "trycloudflare.com URL within "
-        f"{timeout} seconds."
+        "Cloudflare tunnel URL not found."
     )
 
 
-# ============================================================
-# PROCESS CLEANUP
-# ============================================================
-
-def terminate_process(
+def terminate(
     process,
-    name,
 ):
-    """
-    Gracefully terminate a subprocess and force-kill it if
-    necessary.
-    """
 
-    if process is None:
+    if (
+        process is None
+        or process.poll()
+        is not None
+    ):
+
         return
 
-    if process.poll() is None:
-
-        print(
-            f"Stopping {name}..."
-        )
-
-        process.terminate()
-
-        try:
-
-            process.wait(
-                timeout=10
-            )
-
-        except subprocess.TimeoutExpired:
-
-            print(
-                f"{name} did not stop cleanly. "
-                "Killing it..."
-            )
-
-            process.kill()
-
-            try:
-                process.wait(
-                    timeout=5
-                )
-            except subprocess.TimeoutExpired:
-                pass
-
-
-# ============================================================
-# MAIN
-# ============================================================
-
-def main():
-
-    comfy_process = None
-    tunnel_process = None
+    process.terminate()
 
     try:
 
-        print()
-        print("=" * 70)
-        print(
-            "LTX-13B COMFYUI + CLOUDFLARE"
+        process.wait(
+            timeout=10
         )
-        print("=" * 70)
 
-        # ----------------------------------------------------
-        # 1. Ensure cloudflared exists
-        # ----------------------------------------------------
+    except subprocess.TimeoutExpired:
+
+        process.kill()
+
+
+def main():
+
+    comfy = None
+    tunnel = None
+
+    try:
 
         ensure_cloudflared()
 
-        # ----------------------------------------------------
-        # 2. Start ComfyUI
-        # ----------------------------------------------------
-
-        comfy_process = start_comfyui()
-
-        # ----------------------------------------------------
-        # 3. Wait until ComfyUI actually accepts connections
-        # ----------------------------------------------------
-
-        wait_for_comfyui(
-            comfy_process
+        comfy = (
+            start_comfyui()
         )
 
-        # ----------------------------------------------------
-        # 4. Start Cloudflare only AFTER ComfyUI is ready
-        # ----------------------------------------------------
+        wait_for_comfyui(
+            comfy
+        )
 
         (
-            tunnel_process,
+            tunnel,
             output_queue,
         ) = start_tunnel()
 
-        # ----------------------------------------------------
-        # 5. Wait for public tunnel URL
-        # ----------------------------------------------------
-
-        url = wait_for_tunnel_url(
-            tunnel_process,
-            output_queue,
+        public_url = (
+            wait_for_url(
+                tunnel,
+                output_queue,
+            )
         )
 
-        # ----------------------------------------------------
-        # 6. Display URL
-        # ----------------------------------------------------
+        print(
+            "=" * 80
+        )
 
-        print()
-        print("=" * 70)
-        print("✅ COMFYUI IS READY")
-        print("=" * 70)
-        print()
         print(
-            "Open this URL in your normal Chrome/Edge:"
+            "✅ LTX-13B MODERN COMFYUI READY"
         )
-        print()
-        print(url)
-        print()
-        print(
-            "The URL remains available while "
-            "this Kaggle cell is running."
-        )
-        print()
-        print("=" * 70)
-        print(
-            "Keeping ComfyUI + Cloudflare alive..."
-        )
-        print(
-            "Stop the cell to shut them down."
-        )
-        print("=" * 70)
 
-        # ----------------------------------------------------
-        # 7. Keep both processes alive
-        # ----------------------------------------------------
+        print(
+            "=" * 80
+        )
+
+        print(
+            "Local:",
+            f"http://127.0.0.1:{PORT}",
+        )
+
+        print(
+            "Public:",
+            public_url,
+        )
+
+        print(
+            "Keep this Kaggle cell running."
+        )
 
         while True:
 
-            if comfy_process.poll() is not None:
+            if (
+                comfy.poll()
+                is not None
+            ):
 
                 raise RuntimeError(
                     "ComfyUI stopped unexpectedly."
                 )
 
-            if tunnel_process.poll() is not None:
+            if (
+                tunnel.poll()
+                is not None
+            ):
 
                 raise RuntimeError(
                     "Cloudflare tunnel stopped unexpectedly."
                 )
 
-            time.sleep(5)
-
-    except KeyboardInterrupt:
-
-        print(
-            "\nStopping LTX services..."
-        )
-
-    except Exception as exc:
-
-        print()
-        print("=" * 70)
-        print("❌ LTX STARTUP FAILED")
-        print("=" * 70)
-        print()
-        print(exc)
-        print()
-
-        raise
+            time.sleep(
+                5
+            )
 
     finally:
 
-        terminate_process(
-            tunnel_process,
-            "Cloudflare tunnel",
+        terminate(
+            tunnel
         )
 
-        terminate_process(
-            comfy_process,
-            "ComfyUI",
-        )
-
-        print(
-            "✅ Services stopped."
+        terminate(
+            comfy
         )
 
 
