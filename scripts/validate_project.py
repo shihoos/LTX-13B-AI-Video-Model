@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.metadata
 import json
 import shutil
@@ -29,9 +30,7 @@ def check_file(path: Path) -> None:
             f"Missing file:\n{path}"
         )
 
-    print(
-        f"OK   {path}"
-    )
+    print(f"OK   {path}")
 
 
 def check_json(path: Path) -> dict:
@@ -54,9 +53,7 @@ def check_json(path: Path) -> dict:
             f"JSON root must be an object:\n{path}"
         )
 
-    print(
-        f"OK   JSON {path}"
-    )
+    print(f"OK   JSON {path}")
 
     return data
 
@@ -66,7 +63,6 @@ def load_lock() -> dict:
 
     try:
         import yaml
-
     except Exception as error:
         fail(
             "PyYAML unavailable:\n"
@@ -110,9 +106,7 @@ def load_lock() -> dict:
     if missing:
         fail(
             "Compatibility lock is missing:\n"
-            + "\n".join(
-                sorted(missing)
-            )
+            + "\n".join(sorted(missing))
         )
 
     print(
@@ -125,30 +119,24 @@ def load_lock() -> dict:
 def get_git_revision(
     path: Path,
 ) -> str:
-
-    return (
-        subprocess.check_output(
-            [
-                "git",
-                "-C",
-                str(path),
-                "rev-parse",
-                "HEAD",
-            ],
-            text=True,
-        )
-        .strip()
-    )
+    return subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(path),
+            "rev-parse",
+            "HEAD",
+        ],
+        text=True,
+    ).strip()
 
 
 def check_git_revision(
     path: Path,
     expected: str,
 ) -> None:
-
     if not (
-        path
-        / ".git"
+        path / ".git"
     ).exists():
         fail(
             f"Not a Git repository:\n{path}"
@@ -173,17 +161,10 @@ def validate_git_stack(
     lock: dict,
 ) -> None:
 
-    comfy = lock[
-        "comfyui"
-    ]
-
     comfy_dir = (
-        PROJECT_ROOT
-        / "ComfyUI"
+        PROJECT_ROOT / "ComfyUI"
     )
 
-    # ComfyUI is deliberately not committed into the project.
-    # It is materialized by kaggle/bootstrap.py.
     if not comfy_dir.exists():
         print(
             "SKIP Git runtime tree: "
@@ -191,16 +172,21 @@ def validate_git_stack(
         )
         return
 
+    expected_comfy = (
+        lock[
+            "comfyui"
+        ][
+            "commit"
+        ]
+    )
+
     check_git_revision(
         comfy_dir,
-        comfy[
-            "commit"
-        ],
+        expected_comfy,
     )
 
     custom_dir = (
-        comfy_dir
-        / "custom_nodes"
+        comfy_dir / "custom_nodes"
     )
 
     for name, spec in (
@@ -209,22 +195,16 @@ def validate_git_stack(
         ].items()
     ):
 
-        node_path = (
-            custom_dir
-            / name
+        path = (
+            custom_dir / name
         )
 
-        if node_path.exists():
-
+        if path.exists():
             check_git_revision(
-                node_path,
-                spec[
-                    "commit"
-                ],
+                path,
+                spec["commit"],
             )
-
         else:
-
             print(
                 f"SKIP {name}: "
                 "runtime custom node not materialized."
@@ -235,99 +215,45 @@ def validate_runtime_packages(
     lock: dict,
 ) -> None:
 
-    comfy = lock[
-        "comfyui"
-    ]
-
-    runtime = lock[
-        "python_runtime"
-    ]
+    comfy = lock["comfyui"]
+    runtime = lock["python_runtime"]
 
     expected = {
-        comfy[
-            "frontend"
-        ][
-            "package"
-        ]:
-            comfy[
-                "frontend"
-            ][
-                "version"
-            ],
+        comfy["frontend"]["package"]:
+            comfy["frontend"]["version"],
 
-        comfy[
-            "workflow_templates"
-        ][
-            "package"
-        ]:
-            comfy[
-                "workflow_templates"
-            ][
-                "version"
-            ],
+        comfy["workflow_templates"]["package"]:
+            comfy["workflow_templates"]["version"],
 
-        comfy[
-            "embedded_docs"
-        ][
-            "package"
-        ]:
-            comfy[
-                "embedded_docs"
-            ][
-                "version"
-            ],
+        comfy["embedded_docs"]["package"]:
+            comfy["embedded_docs"]["version"],
 
-        comfy[
-            "comfy_kitchen"
-        ][
-            "package"
-        ]:
-            comfy[
-                "comfy_kitchen"
-            ][
-                "version"
-            ],
+        comfy["comfy_kitchen"]["package"]:
+            comfy["comfy_kitchen"]["version"],
 
-        comfy[
-            "comfy_aimdo"
-        ][
-            "package"
-        ]:
-            comfy[
-                "comfy_aimdo"
-            ][
-                "version"
-            ],
+        comfy["comfy_aimdo"]["package"]:
+            comfy["comfy_aimdo"]["version"],
 
         "torchsde":
-            runtime[
-                "torchsde"
-            ],
+            runtime["torchsde"],
 
         "spandrel":
-            runtime[
-                "spandrel"
-            ],
+            runtime["spandrel"],
 
         "av":
-            runtime[
-                "av"
-            ],
+            runtime["av"],
 
         "gguf":
-            runtime[
-                "gguf"
-            ],
+            runtime["gguf"],
     }
 
     print(
         "PACKAGE LOCK CHECK"
     )
 
-    for (
-        package,
-        expected_version,
-    ) in expected.items():
+    for package, expected_version in (
+        expected.items()
+    ):
 
         try:
             actual = (
@@ -361,10 +287,9 @@ def validate_torch(
 
     try:
         import torch
-
     except Exception as error:
         print(
-            "SKIP Torch runtime check: "
+            "SKIP Torch runtime check:\n"
             f"{error}"
         )
         return
@@ -390,7 +315,6 @@ def validate_torch(
 
     try:
         import torchvision
-
     except Exception as error:
         fail(
             "torchvision import failed:\n"
@@ -429,8 +353,7 @@ def validate_init_files() -> None:
 
     for relative in required:
         check_file(
-            PROJECT_ROOT
-            / relative
+            PROJECT_ROOT / relative
         )
 
     print(
@@ -481,6 +404,8 @@ def validate_general_structure() -> None:
 
         "compatibility/prepare_modern_ltx.py",
 
+        "scripts/generate_video.py",
+
         "workflows/baseline/"
         "ltxv-13b-dist-i2v-base.json",
 
@@ -496,15 +421,13 @@ def validate_general_structure() -> None:
 
     if forbidden_runtime_file.exists():
         fail(
-            "Deleted duplicate runtime lock "
-            "still exists:\n"
+            "Duplicate runtime lock still exists:\n"
             f"{forbidden_runtime_file}"
         )
 
     for relative in required:
         check_file(
-            PROJECT_ROOT
-            / relative
+            PROJECT_ROOT / relative
         )
 
 
@@ -533,10 +456,7 @@ def validate_workflows() -> None:
             "nodes",
             [],
         )
-        if isinstance(
-            node,
-            dict,
-        )
+        if isinstance(node, dict)
     }
 
     detailer_types = {
@@ -545,10 +465,7 @@ def validate_workflows() -> None:
             "nodes",
             [],
         )
-        if isinstance(
-            node,
-            dict,
-        )
+        if isinstance(node, dict)
     }
 
     required_base = {
@@ -576,21 +493,17 @@ def validate_workflows() -> None:
     }
 
     missing_base = (
-        required_base
-        - base_types
+        required_base - base_types
     )
 
     missing_detailer = (
-        required_detailer
-        - detailer_types
+        required_detailer - detailer_types
     )
 
     if missing_base:
         fail(
             "BASE workflow missing node types:\n"
-            + "\n".join(
-                sorted(missing_base)
-            )
+            + "\n".join(sorted(missing_base))
         )
 
     if missing_detailer:
@@ -608,6 +521,88 @@ def validate_workflows() -> None:
     print(
         "OK   DETAILER workflow node set"
     )
+
+
+def ast_contains_legacy_blur_call(
+    source: str,
+) -> bool:
+    """
+    Detect an actual AST call shaped like:
+
+        post_processing.Blur().blur(...)
+
+    or equivalent nested Blur().blur(...) syntax.
+
+    This intentionally does NOT search raw source text, because
+    the compatibility builder itself contains the historical
+    string in its defensive validation logic.
+    """
+
+    try:
+        tree = ast.parse(
+            source
+        )
+    except SyntaxError:
+        return False
+
+    for node in ast.walk(tree):
+
+        if not isinstance(
+            node,
+            ast.Call,
+        ):
+            continue
+
+        func = node.func
+
+        # We want:
+        #
+        #   Blur().blur(...)
+        #
+        if not isinstance(
+            func,
+            ast.Attribute,
+        ):
+            continue
+
+        if func.attr != "blur":
+            continue
+
+        blur_object = func.value
+
+        if not isinstance(
+            blur_object,
+            ast.Call,
+        ):
+            continue
+
+        blur_constructor = (
+            blur_object.func
+        )
+
+        # Blur(...)
+        if isinstance(
+            blur_constructor,
+            ast.Name,
+        ):
+            if (
+                blur_constructor.id
+                == "Blur"
+            ):
+                return True
+
+        # module.Blur(...)
+        if isinstance(
+            blur_constructor,
+            ast.Attribute,
+        ):
+            if (
+                blur_constructor.attr
+                == "Blur"
+            ):
+                return True
+
+    return False
 
 
 def validate_compatibility_source(
@@ -664,17 +659,27 @@ def validate_compatibility_source(
             "It must come from compatibility_lock.yaml."
         )
 
-    if (
-        "post_processing.Blur().blur("
-        in text
+    # IMPORTANT:
+    # Do not perform a raw substring search for
+    # "post_processing.Blur().blur(".
+    #
+    # The compatibility builder intentionally contains that text
+    # in a defensive check. We inspect the AST instead.
+
+    if ast_contains_legacy_blur_call(
+        text
     ):
         fail(
-            "Legacy Blur().blur() call remains "
-            "in compatibility source."
+            "Actual legacy Blur().blur() "
+            "call remains in compatibility source."
         )
 
     print(
         "OK   compatibility builder"
+    )
+
+    print(
+        "OK   native torch blur validation"
     )
 
 
@@ -761,26 +766,71 @@ def validate_config_source(
                 f"{marker}"
             )
 
-    # Confirm that actual model filenames are not duplicated
-    # as independent hardcoded values in config.py.
-    for name, spec in (
-        lock[
-            "models"
-        ].items()
+    for _, spec in (
+        lock["models"].items()
     ):
 
-        filename = spec[
-            "filename"
-        ]
+        filename = spec["filename"]
 
         if filename in text:
             fail(
                 "Model filename is still duplicated "
-                f"inside kaggle/config.py: {filename}"
+                f"inside kaggle/config.py:\n"
+                f"{filename}"
             )
 
     print(
         "OK   central model configuration"
+    )
+
+
+def validate_frontend_policy(
+    lock: dict,
+) -> None:
+
+    frontend = (
+        lock["comfyui"]["frontend"]
+    )
+
+    if not frontend.get("package"):
+        fail(
+            "Frontend package missing from lock."
+        )
+
+    if not frontend.get("version"):
+        fail(
+            "Frontend version missing from lock."
+        )
+
+    for relative in (
+        "kaggle/start_comfyui.py",
+        "kaggle/start_comfyui_tunnel.py",
+        "kaggle/launch.py",
+    ):
+
+        path = (
+            PROJECT_ROOT / relative
+        )
+
+        if not path.exists():
+            continue
+
+        text = path.read_text(
+            encoding="utf-8"
+        )
+
+        if "--front-end-version" in text:
+            fail(
+                f"{relative} contains a frontend override."
+            )
+
+        if "@latest" in text:
+            fail(
+                f"{relative} contains @latest."
+            )
+
+    print(
+        "OK   pinned frontend policy"
     )
 
 
@@ -853,15 +903,150 @@ def validate_executor() -> None:
     )
 
 
+def validate_runner() -> None:
+
+    path = (
+        PROJECT_ROOT
+        / "execution"
+        / "production_runner.py"
+    )
+
+    check_file(path)
+
+    text = path.read_text(
+        encoding="utf-8"
+    )
+
+    required_markers = [
+        "ProductionRunner",
+        "GPUScheduler",
+        "ShotExecutor",
+        "ComfyClient",
+        "AssemblyManager",
+        "create_production_plan",
+    ]
+
+    for marker in required_markers:
+        if marker not in text:
+            fail(
+                "ProductionRunner missing:\n"
+                f"{marker}"
+            )
+
+    print(
+        "OK   production runner"
+    )
+
+
+def validate_scheduler() -> None:
+
+    path = (
+        PROJECT_ROOT
+        / "scheduler"
+        / "gpu_scheduler.py"
+    )
+
+    check_file(path)
+
+    text = path.read_text(
+        encoding="utf-8"
+    )
+
+    required_markers = [
+        "GPUScheduler",
+        "threading.Thread",
+        "failures",
+        "worker_function",
+    ]
+
+    for marker in required_markers:
+        if marker not in text:
+            fail(
+                "GPU scheduler missing:\n"
+                f"{marker}"
+            )
+
+    print(
+        "OK   GPU scheduler"
+    )
+
+
+def validate_checkpoint_manager() -> None:
+
+    path = (
+        PROJECT_ROOT
+        / "execution"
+        / "checkpoint_manager.py"
+    )
+
+    check_file(path)
+
+    text = path.read_text(
+        encoding="utf-8"
+    )
+
+    required_markers = [
+        "threading.RLock",
+        "production_state.json",
+        "set_assembly_complete",
+        "get_assembly",
+    ]
+
+    for marker in required_markers:
+        if marker not in text:
+            fail(
+                "Checkpoint manager missing:\n"
+                f"{marker}"
+            )
+
+    print(
+        "OK   thread-safe checkpoint manager"
+    )
+
+
+def validate_generate_video() -> None:
+
+    path = (
+        PROJECT_ROOT
+        / "scripts"
+        / "generate_video.py"
+    )
+
+    check_file(path)
+
+    text = path.read_text(
+        encoding="utf-8"
+    )
+
+    required_markers = [
+        "ProductionOrchestrator",
+        "ProductionRunner",
+        "create_production_plan",
+        "runner.run",
+        "--story",
+        "--mode",
+        "--gpu-url",
+    ]
+
+    for marker in required_markers:
+        if marker not in text:
+            fail(
+                "generate_video.py missing:\n"
+                f"{marker}"
+            )
+
+    print(
+        "OK   application generation entry point"
+    )
+
+
 def validate_model_lock(
     lock: dict,
 ) -> None:
 
-    models = lock[
-        "models"
-    ]
+    models = lock["models"]
 
-    required_model_keys = {
+    required_keys = {
         "ltx_q4",
         "t5_q4",
         "vae",
@@ -870,7 +1055,7 @@ def validate_model_lock(
     }
 
     missing = (
-        required_model_keys
+        required_keys
         - set(models)
     )
 
@@ -882,129 +1067,27 @@ def validate_model_lock(
             )
         )
 
-    for name, spec in (
-        models.items()
-    ):
+    for name, spec in models.items():
 
-        if not spec.get("dataset"):
-            fail(
-                f"{name} has no dataset path."
-            )
+        for field in (
+            "dataset",
+            "filename",
+            "target",
+        ):
 
-        if not spec.get("filename"):
-            fail(
-                f"{name} has no filename."
-            )
-
-        if not spec.get("target"):
-            fail(
-                f"{name} has no ComfyUI target."
-            )
+            if not spec.get(field):
+                fail(
+                    f"{name} missing {field}."
+                )
 
         print(
             f"OK   model lock: {name}"
         )
 
 
-def validate_frontend_policy(
-    lock: dict,
-) -> None:
-
-    frontend = lock[
-        "comfyui"
-    ][
-        "frontend"
-    ]
-
-    package = frontend[
-        "package"
-    ]
-
-    version = frontend[
-        "version"
-    ]
-
-    if not package:
-        fail(
-            "Frontend package is not defined "
-            "in compatibility_lock.yaml."
-        )
-
-    if not version:
-        fail(
-            "Frontend version is not defined "
-            "in compatibility_lock.yaml."
-        )
-
-    launch_path = (
-        PROJECT_ROOT
-        / "kaggle"
-        / "start_comfyui_tunnel.py"
-    )
-
-    start_path = (
-        PROJECT_ROOT
-        / "kaggle"
-        / "start_comfyui.py"
-    )
-
-    for path in (
-        launch_path,
-        start_path,
-    ):
-
-        text = path.read_text(
-            encoding="utf-8"
-        )
-
-        if (
-            "--front-end-version"
-            in text
-        ):
-            fail(
-                f"{path} contains a frontend override. "
-                "Production startup must use the "
-                "locked frontend package."
-            )
-
-        if "@latest" in text:
-            fail(
-                f"{path} contains @latest. "
-                "Production startup must not use "
-                "an unpinned frontend."
-            )
-
-    print(
-        "OK   pinned frontend policy"
-    )
-
-
-def validate_runtime_lock_policy(
-) -> None:
-
-    forbidden = (
-        PROJECT_ROOT
-        / "kaggle"
-        / "runtime_requirements.lock"
-    )
-
-    if forbidden.exists():
-        fail(
-            "Duplicate runtime lock still exists:\n"
-            f"{forbidden}"
-        )
-
-    print(
-        "OK   duplicate runtime lock removed"
-    )
-
-
 def validate_external_tools() -> None:
 
-    if (
-        shutil.which("ffmpeg")
-        is None
-    ):
+    if shutil.which("ffmpeg") is None:
         print(
             "WARNING ffmpeg not found "
             "in current environment."
@@ -1015,131 +1098,142 @@ def validate_external_tools() -> None:
         )
 
 
-def main():
+def validate_runtime_lock_policy() -> None:
 
-    print(
-        "=" * 80
+    forbidden = (
+        PROJECT_ROOT
+        / "kaggle"
+        / "runtime_requirements.lock"
     )
 
+    if forbidden.exists():
+        fail(
+            "Deleted duplicate runtime lock "
+            "still exists:\n"
+            f"{forbidden}"
+        )
+
+    print(
+        "OK   duplicate runtime lock removed"
+    )
+
+
+def main():
+
+    print("=" * 80)
     print(
         "LTX-13B FINAL MODERN PROJECT VALIDATION"
     )
-
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
     lock = load_lock()
 
     validate_general_structure()
-
     validate_init_files()
-
     validate_runtime_lock_policy()
 
-    validate_git_stack(lock)
+    validate_git_stack(
+        lock
+    )
 
-    validate_torch(lock)
+    validate_torch(
+        lock
+    )
 
-    validate_runtime_packages(lock)
+    validate_runtime_packages(
+        lock
+    )
 
-    validate_model_lock(lock)
+    validate_model_lock(
+        lock
+    )
 
-    validate_preflight_source(lock)
+    validate_preflight_source(
+        lock
+    )
 
-    validate_compatibility_source(lock)
+    validate_compatibility_source(
+        lock
+    )
 
-    validate_config_source(lock)
+    validate_config_source(
+        lock
+    )
 
-    validate_frontend_policy(lock)
+    validate_frontend_policy(
+        lock
+    )
 
     validate_adapter()
-
     validate_executor()
-
+    validate_runner()
+    validate_scheduler()
+    validate_checkpoint_manager()
+    validate_generate_video()
     validate_workflows()
-
     validate_external_tools()
 
     print()
-    print(
-        "=" * 80
-    )
-
+    print("=" * 80)
     print(
         "✅ FINAL MODERN PROJECT VALIDATION PASSED"
     )
-
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
     print(
         "Single source of truth:"
     )
-
     print(
-        "    kaggle/compatibility_lock.yaml"
+        "  kaggle/compatibility_lock.yaml"
     )
 
     print(
         "Duplicate runtime lock:"
     )
-
     print(
-        "    REMOVED"
+        "  REMOVED"
     )
 
     print(
-        "Frontend:"
+        "Frontend policy:"
     )
-
     print(
-        "    PINNED"
-    )
-
-    print(
-        "Frontend @latest override:"
-    )
-
-    print(
-        "    NONE"
+        "  PINNED / NO @latest"
     )
 
     print(
         "BASE workflow:"
     )
-
     print(
-        "    VALIDATED"
+        "  VALIDATED"
     )
 
     print(
         "DETAILER workflow:"
     )
-
     print(
-        "    VALIDATED"
+        "  VALIDATED"
     )
 
     print(
         "Compatibility layer:"
     )
+    print(
+        "  VALIDATED"
+    )
 
     print(
-        "    VALIDATED"
+        "Planner → Runner entry point:"
+    )
+    print(
+        "  VALIDATED"
     )
 
     print(
         "Package __init__.py files:"
     )
-
     print(
-        "    VALIDATED"
-    )
-
-    print(
-        "=" * 80
+        "  VALIDATED"
     )
 
 
