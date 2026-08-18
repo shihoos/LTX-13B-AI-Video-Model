@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import importlib
 import importlib.metadata
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -12,6 +12,12 @@ from pathlib import Path
 
 PROJECT_ROOT = (
     Path(__file__).resolve().parents[1]
+)
+
+LOCK_FILE = (
+    PROJECT_ROOT
+    / "kaggle"
+    / "compatibility_lock.yaml"
 )
 
 
@@ -39,29 +45,6 @@ def check_file(
     )
 
 
-def check_import(
-    module_name: str,
-):
-
-    try:
-
-        importlib.import_module(
-            module_name
-        )
-
-    except Exception as error:
-
-        fail(
-            "Import failed:\n"
-            f"{module_name}\n"
-            f"{error}"
-        )
-
-    print(
-        f"OK   import {module_name}"
-    )
-
-
 def check_json(
     path: Path,
 ):
@@ -73,7 +56,7 @@ def check_json(
             encoding="utf-8",
         ) as file:
 
-            json.load(
+            data = json.load(
                 file
             )
 
@@ -89,20 +72,17 @@ def check_json(
         f"OK   JSON {path}"
     )
 
+    return data
 
-def check_lock():
 
-    lock = (
-        PROJECT_ROOT
-        / "kaggle"
-        / "compatibility_lock.yaml"
-    )
+def load_lock():
 
     check_file(
-        lock
+        LOCK_FILE
     )
 
     try:
+
         import yaml
 
     except Exception as error:
@@ -112,7 +92,7 @@ def check_lock():
             f"{error}"
         )
 
-    with lock.open(
+    with LOCK_FILE.open(
         "r",
         encoding="utf-8",
     ) as file:
@@ -121,26 +101,49 @@ def check_lock():
             file
         )
 
-    required_sections = [
-        "comfyui",
-        "python_runtime",
-        "custom_nodes",
-        "legacy_ltx_098_compat",
-        "detailer_compat",
-        "models",
-        "validation",
-    ]
-
-    for section in (
-        required_sections
+    if not isinstance(
+        data,
+        dict,
     ):
 
-        if section not in data:
+        fail(
+            "compatibility_lock.yaml "
+            "is not a valid mapping."
+        )
 
-            fail(
-                "Compatibility lock is missing "
-                f"section: {section}"
+    required_sections = {
+
+        "comfyui",
+
+        "python_runtime",
+
+        "custom_nodes",
+
+        "legacy_ltx_098_compat",
+
+        "detailer_compat",
+
+        "models",
+
+        "validation",
+
+    }
+
+    missing = (
+        required_sections
+        - set(data)
+    )
+
+    if missing:
+
+        fail(
+            "Compatibility lock is missing:\n"
+            + "\n".join(
+                sorted(
+                    missing
+                )
             )
+        )
 
     print(
         "OK   compatibility lock structure"
@@ -149,12 +152,11 @@ def check_lock():
     return data
 
 
-def check_git_revision(
+def get_git_revision(
     path: Path,
-    expected: str,
 ):
 
-    actual = (
+    return (
         subprocess.check_output(
             [
                 "git",
@@ -166,6 +168,27 @@ def check_git_revision(
             text=True,
         )
         .strip()
+    )
+
+
+def check_git_revision(
+    path: Path,
+    expected: str,
+):
+
+    if not (
+        path
+        / ".git"
+    ).exists():
+
+        fail(
+            f"Not a Git repository:\n{path}"
+        )
+
+    actual = (
+        get_git_revision(
+            path
+        )
     )
 
     if actual != expected:
@@ -195,361 +218,58 @@ def validate_git_stack(
         / "ComfyUI"
     )
 
-    if comfy_dir.exists():
+    if not comfy_dir.exists():
 
-        check_git_revision(
-            comfy_dir,
-            comfy[
-                "commit"
-            ],
+        print(
+            "SKIP Git runtime tree: "
+            "ComfyUI is not present in repository."
         )
 
-        custom_dir = (
-            comfy_dir
-            / "custom_nodes"
-        )
+        return
 
-        for name, spec in (
-            lock[
-                "custom_nodes"
-            ].items()
-        ):
-
-            node_path = (
-                custom_dir
-                / name
-            )
-
-            if node_path.exists():
-
-                check_git_revision(
-                    node_path,
-                    spec[
-                        "commit"
-                    ],
-                )
-
-
-def validate_workflows():
-
-    base = (
-        PROJECT_ROOT
-        / "workflows"
-        / "baseline"
-        / "ltxv-13b-dist-i2v-base.json"
+    check_git_revision(
+        comfy_dir,
+        comfy[
+            "commit"
+        ],
     )
 
-    detailer = (
-        PROJECT_ROOT
-        / "workflows"
-        / "detailer"
-        / "ltxv-13b-098-ic-lora-upscale.json"
+    custom_dir = (
+        comfy_dir
+        / "custom_nodes"
     )
-
-    check_json(
-        base
-    )
-
-    check_json(
-        detailer
-    )
-
-    base_data = json.loads(
-        base.read_text(
-            encoding="utf-8"
-        )
-    )
-
-    detailer_data = json.loads(
-        detailer.read_text(
-            encoding="utf-8"
-        )
-    )
-
-    base_types = {
-        node.get("type")
-        for node in base_data.get(
-            "nodes",
-            [],
-        )
-        if isinstance(
-            node,
-            dict,
-        )
-    }
-
-    detailer_types = {
-        node.get("type")
-        for node in detailer_data.get(
-            "nodes",
-            [],
-        )
-        if isinstance(
-            node,
-            dict,
-        )
-    }
-
-    required_base = {
-        "LTXVBaseSampler",
-        "LTXVConditioning",
-        "STGGuiderAdvanced",
-        "FloatToSigmas",
-        "StringToFloatList",
-        "UnetLoaderGGUF",
-        "CLIPLoaderGGUF",
-        "VAELoader",
-        "Set VAE Decoder Noise",
-        "VHS_VideoCombine",
-    }
-
-    required_detailer = {
-        "VHS_LoadVideo",
-        "LTXVLoopingSampler",
-        "LTXVLatentUpsampler",
-        "LTXVLatentUpsamplerModelLoader",
-        "LTXVTiledVAEDecode",
-        "LTXVFilmGrain",
-        "LoraLoaderModelOnly",
-        "VHS_VideoCombine",
-    }
-
-    missing_base = (
-        required_base
-        - base_types
-    )
-
-    missing_detailer = (
-        required_detailer
-        - detailer_types
-    )
-
-    if missing_base:
-
-        fail(
-            "BASE workflow is missing node types:\n"
-            + "\n".join(
-                sorted(
-                    missing_base
-                )
-            )
-        )
-
-    if missing_detailer:
-
-        fail(
-            "DETAILER workflow is missing node types:\n"
-            + "\n".join(
-                sorted(
-                    missing_detailer
-                )
-            )
-        )
-
-    print(
-        "OK   BASE workflow node set"
-    )
-
-    print(
-        "OK   DETAILER workflow node set"
-    )
-
-
-def validate_compatibility_sources():
-
-    compatibility = (
-        PROJECT_ROOT
-        / "compatibility"
-        / "prepare_modern_ltx.py"
-    )
-
-    check_file(
-        compatibility
-    )
-
-    text = compatibility.read_text(
-        encoding="utf-8"
-    )
-
-    required_markers = [
-
-        "LEGACY_LTX_COMMIT",
-
-        "blur_internal(image, blur_radius)",
-
-        "LTXVBaseSampler",
-
-        "LTXVLoopingSampler",
-
-        "LTXVTiledSampler",
-
-        "LTXVTiledVAEDecode",
-
-        "LTXVLatentUpsampler",
-
-        "LTXVLatentUpsamplerModelLoader",
-
-        "LTXVFilmGrain",
-
-        "STGGuiderAdvanced",
-
-        "Set VAE Decoder Noise",
-
-    ]
-
-    for marker in (
-        required_markers
-    ):
-
-        if marker not in text:
-
-            fail(
-                "Modern compatibility source "
-                f"is missing marker: {marker}"
-            )
-
-    print(
-        "OK   modern compatibility builder"
-    )
-
-
-def validate_adapter():
-
-    adapter = (
-        PROJECT_ROOT
-        / "execution"
-        / "comfy_workflow_adapter.py"
-    )
-
-    check_file(
-        adapter
-    )
-
-    text = adapter.read_text(
-        encoding="utf-8"
-    )
-
-    required_markers = [
-
-        "LTXVLatentUpsamplerModelLoader",
-
-        "LatentUpscaleModelLoader",
-
-        "apply_modern_compatibility",
-
-        "validate_modern_detailer",
-
-        "set_input_video",
-
-    ]
-
-    for marker in (
-        required_markers
-    ):
-
-        if marker not in text:
-
-            fail(
-                "Modern workflow adapter "
-                f"is missing marker: {marker}"
-            )
-
-    print(
-        "OK   workflow adapter"
-    )
-
-
-def validate_executor():
-
-    executor = (
-        PROJECT_ROOT
-        / "execution"
-        / "shot_executor.py"
-    )
-
-    check_file(
-        executor
-    )
-
-    text = executor.read_text(
-        encoding="utf-8"
-    )
-
-    required_markers = [
-
-        "_copy_raw_to_comfy_input",
-
-        "VHS_LoadVideo",
-
-        "execute_raw",
-
-        "execute_detailer",
-
-        "mark_raw_complete",
-
-        "mark_upscaled_complete",
-
-    ]
-
-    for marker in (
-        required_markers
-    ):
-
-        if marker not in text:
-
-            fail(
-                "ShotExecutor is missing "
-                f"required stage marker: {marker}"
-            )
-
-    print(
-        "OK   BASE→DETAILER physical handoff"
-    )
-
-
-def validate_models(
-    lock,
-):
-
-    models = lock[
-        "models"
-    ]
 
     for name, spec in (
-        models.items()
+        lock[
+            "custom_nodes"
+        ].items()
     ):
 
-        source = (
-            Path(
-                spec[
-                    "dataset"
-                ]
-            )
-            / spec[
-                "filename"
-            ]
+        node_path = (
+            custom_dir
+            / name
         )
 
-        if source.exists():
+        if node_path.exists():
 
-            print(
-                f"OK   {name}: "
-                f"{source.name}"
+            check_git_revision(
+                node_path,
+                spec[
+                    "commit"
+                ],
             )
 
         else:
 
             print(
                 f"SKIP {name}: "
-                f"Kaggle dataset not mounted"
+                "runtime custom node not materialized."
             )
 
 
 def validate_runtime_packages(
     lock,
 ):
-
-    expected = {}
 
     comfy = lock[
         "comfyui"
@@ -559,78 +279,83 @@ def validate_runtime_packages(
         "python_runtime"
     ]
 
-    expected[
+    expected = {
+
         comfy[
             "frontend"
         ][
             "package"
-        ]
-    ] = comfy[
-        "frontend"
-    ][
-        "version"
-    ]
+        ]:
+            comfy[
+                "frontend"
+            ][
+                "version"
+            ],
 
-    expected[
         comfy[
             "workflow_templates"
         ][
             "package"
-        ]
-    ] = comfy[
-        "workflow_templates"
-    ][
-        "version"
-    ]
+        ]:
+            comfy[
+                "workflow_templates"
+            ][
+                "version"
+            ],
 
-    expected[
         comfy[
             "embedded_docs"
         ][
             "package"
-        ]
-    ] = comfy[
-        "embedded_docs"
-    ][
-        "version"
-    ]
+        ]:
+            comfy[
+                "embedded_docs"
+            ][
+                "version"
+            ],
 
-    expected[
         comfy[
             "comfy_kitchen"
         ][
             "package"
-        ]
-    ] = comfy[
-        "comfy_kitchen"
-    ][
-        "version"
-    ]
+        ]:
+            comfy[
+                "comfy_kitchen"
+            ][
+                "version"
+            ],
 
-    expected[
         comfy[
             "comfy_aimdo"
         ][
             "package"
-        ]
-    ] = comfy[
-        "comfy_aimdo"
-    ][
-        "version"
-    ]
+        ]:
+            comfy[
+                "comfy_aimdo"
+            ][
+                "version"
+            ],
 
-    for name in (
-        "torchsde",
-        "spandrel",
-        "av",
-        "gguf",
-    ):
+        "torchsde":
+            runtime[
+                "torchsde"
+            ],
 
-        expected[
-            name
-        ] = runtime[
-            name
-        ]
+        "spandrel":
+            runtime[
+                "spandrel"
+            ],
+
+        "av":
+            runtime[
+                "av"
+            ],
+
+        "gguf":
+            runtime[
+                "gguf"
+            ],
+    }
 
     print(
         "PACKAGE LOCK CHECK"
@@ -675,9 +400,82 @@ def validate_runtime_packages(
         )
 
 
+def validate_torch(
+    lock,
+):
+
+    try:
+
+        import torch
+
+    except Exception as error:
+
+        print(
+            "SKIP Torch runtime check: "
+            f"{error}"
+        )
+
+        return
+
+    runtime = lock[
+        "python_runtime"
+    ]
+
+    expected_torch = runtime[
+        "torch"
+    ]
+
+    if (
+        torch.__version__
+        != expected_torch
+    ):
+
+        fail(
+            f"Torch mismatch.\n"
+            f"Expected: {expected_torch}\n"
+            f"Actual: {torch.__version__}"
+        )
+
+    print(
+        f"OK   torch=={torch.__version__}"
+    )
+
+    try:
+
+        import torchvision
+
+        expected_tv = runtime[
+            "torchvision"
+        ]
+
+        if (
+            torchvision.__version__
+            != expected_tv
+        ):
+
+            fail(
+                f"torchvision mismatch.\n"
+                f"Expected: {expected_tv}\n"
+                f"Actual: "
+                f"{torchvision.__version__}"
+            )
+
+        print(
+            f"OK   torchvision=="
+            f"{torchvision.__version__}"
+        )
+
+    except Exception as error:
+
+        print(
+            "SKIP torchvision runtime check: "
+            f"{error}"
+        )
+
+
 def validate_init_files():
 
-    required = {
+    required = [
 
         "execution/__init__.py",
 
@@ -689,19 +487,15 @@ def validate_init_files():
 
         "scheduler/__init__.py",
 
-    }
+    ]
 
     for relative in (
         required
     ):
 
-        path = (
+        check_file(
             PROJECT_ROOT
             / relative
-        )
-
-        check_file(
-            path
         )
 
     print(
@@ -743,17 +537,37 @@ def validate_general_structure():
         "schemas/parser.py",
 
         "kaggle/bootstrap.py",
+        "kaggle/config.py",
+        "kaggle/compatibility_lock.yaml",
         "kaggle/launch.py",
-        "kaggle/preflight_modern.py",
-        "kaggle/runtime_requirements.lock",
-        "kaggle/start_comfyui_tunnel.py",
         "kaggle/model_paths.yaml",
+        "kaggle/preflight_modern.py",
+        "kaggle/start_comfyui.py",
+        "kaggle/start_comfyui_tunnel.py",
 
         "compatibility/prepare_modern_ltx.py",
 
-        "workflows/baseline/ltxv-13b-dist-i2v-base.json",
-        "workflows/detailer/ltxv-13b-098-ic-lora-upscale.json",
+        "workflows/baseline/"
+        "ltxv-13b-dist-i2v-base.json",
+
+        "workflows/detailer/"
+        "ltxv-13b-098-ic-lora-upscale.json",
+
     ]
+
+    forbidden_runtime_file = (
+        PROJECT_ROOT
+        / "kaggle"
+        / "runtime_requirements.lock"
+    )
+
+    if forbidden_runtime_file.exists():
+
+        fail(
+            "Deleted duplicate runtime lock "
+            "still exists:\n"
+            f"{forbidden_runtime_file}"
+        )
 
     for relative in (
         required
@@ -762,6 +576,503 @@ def validate_general_structure():
         check_file(
             PROJECT_ROOT
             / relative
+        )
+
+
+def validate_workflows():
+
+    base = (
+        PROJECT_ROOT
+        / "workflows"
+        / "baseline"
+        / "ltxv-13b-dist-i2v-base.json"
+    )
+
+    detailer = (
+        PROJECT_ROOT
+        / "workflows"
+        / "detailer"
+        / "ltxv-13b-098-ic-lora-upscale.json"
+    )
+
+    base_data = check_json(
+        base
+    )
+
+    detailer_data = check_json(
+        detailer
+    )
+
+    base_types = {
+
+        node.get("type")
+
+        for node in base_data.get(
+            "nodes",
+            [],
+        )
+
+        if isinstance(
+            node,
+            dict,
+        )
+    }
+
+    detailer_types = {
+
+        node.get("type")
+
+        for node in detailer_data.get(
+            "nodes",
+            [],
+        )
+
+        if isinstance(
+            node,
+            dict,
+        )
+    }
+
+    required_base = {
+
+        "LTXVBaseSampler",
+
+        "LTXVConditioning",
+
+        "STGGuiderAdvanced",
+
+        "FloatToSigmas",
+
+        "StringToFloatList",
+
+        "UnetLoaderGGUF",
+
+        "CLIPLoaderGGUF",
+
+        "VAELoader",
+
+        "Set VAE Decoder Noise",
+
+        "VHS_VideoCombine",
+
+    }
+
+    required_detailer = {
+
+        "VHS_LoadVideo",
+
+        "LTXVLoopingSampler",
+
+        "LTXVLatentUpsampler",
+
+        "LTXVLatentUpsamplerModelLoader",
+
+        "LTXVTiledVAEDecode",
+
+        "LTXVFilmGrain",
+
+        "LoraLoaderModelOnly",
+
+        "VHS_VideoCombine",
+
+    }
+
+    missing_base = (
+        required_base
+        - base_types
+    )
+
+    missing_detailer = (
+        required_detailer
+        - detailer_types
+    )
+
+    if missing_base:
+
+        fail(
+            "BASE workflow missing node types:\n"
+            + "\n".join(
+                sorted(
+                    missing_base
+                )
+            )
+        )
+
+    if missing_detailer:
+
+        fail(
+            "DETAILER workflow missing node types:\n"
+            + "\n".join(
+                sorted(
+                    missing_detailer
+                )
+            )
+        )
+
+    print(
+        "OK   BASE workflow node set"
+    )
+
+    print(
+        "OK   DETAILER workflow node set"
+    )
+
+
+def validate_compatibility_source(
+    lock,
+):
+
+    path = (
+        PROJECT_ROOT
+        / "compatibility"
+        / "prepare_modern_ltx.py"
+    )
+
+    check_file(
+        path
+    )
+
+    text = path.read_text(
+        encoding="utf-8"
+    )
+
+    required_markers = [
+
+        "load_lock",
+
+        "get_legacy_commit",
+
+        "compatibility_lock.yaml",
+
+        "blur_internal(image, blur_radius)",
+
+        "LTXVBaseSampler",
+
+        "LTXVLoopingSampler",
+
+        "LTXVTiledSampler",
+
+        "LTXVTiledVAEDecode",
+
+        "LTXVLatentUpsampler",
+
+        "LTXVLatentUpsamplerModelLoader",
+
+        "LTXVFilmGrain",
+
+        "STGGuiderAdvanced",
+
+        "Set VAE Decoder Noise",
+
+    ]
+
+    for marker in (
+        required_markers
+    ):
+
+        if marker not in text:
+
+            fail(
+                "Compatibility builder is missing:\n"
+                f"{marker}"
+            )
+
+    legacy_commit = (
+        lock[
+            "legacy_ltx_098_compat"
+        ][
+            "commit"
+        ]
+    )
+
+    if legacy_commit in text:
+
+        fail(
+            "Legacy LTX commit is still hardcoded "
+            "inside prepare_modern_ltx.py.\n"
+            "It must come from compatibility_lock.yaml."
+        )
+
+    print(
+        "OK   compatibility builder"
+    )
+
+
+def validate_preflight_source():
+
+    path = (
+        PROJECT_ROOT
+        / "kaggle"
+        / "preflight_modern.py"
+    )
+
+    check_file(
+        path
+    )
+
+    text = path.read_text(
+        encoding="utf-8"
+    )
+
+    required_markers = [
+
+        "compatibility_lock.yaml",
+
+        "python_runtime",
+
+        "models",
+
+        "verify_gpu",
+
+        "verify_locked_packages",
+
+    ]
+
+    for marker in (
+        required_markers
+    ):
+
+        if marker not in text:
+
+            fail(
+                "Preflight is missing:\n"
+                f"{marker}"
+            )
+
+    expected_torch = (
+        lock[
+            "python_runtime"
+        ][
+            "torch"
+        ]
+    )
+
+    if expected_torch in text:
+
+        fail(
+            "Torch version is still hardcoded "
+            "inside preflight_modern.py."
+        )
+
+    print(
+        "OK   modern preflight"
+    )
+
+
+def validate_config_source(
+    lock,
+):
+
+    path = (
+        PROJECT_ROOT
+        / "kaggle"
+        / "config.py"
+    )
+
+    check_file(
+        path
+    )
+
+    text = path.read_text(
+        encoding="utf-8"
+    )
+
+    required_markers = [
+
+        "compatibility_lock.yaml",
+
+        "MODELS",
+
+        "Q4_MODEL",
+
+        "VAE_MODEL",
+
+        "T5_MODEL",
+
+        "DETAILER_LORA",
+
+        "SPATIAL_UPSCALER",
+
+    ]
+
+    for marker in (
+        required_markers
+    ):
+
+        if marker not in text:
+
+            fail(
+                "kaggle/config.py is missing:\n"
+                f"{marker}"
+            )
+
+    print(
+        "OK   central model configuration"
+    )
+
+
+def validate_adapter():
+
+    path = (
+        PROJECT_ROOT
+        / "execution"
+        / "comfy_workflow_adapter.py"
+    )
+
+    check_file(
+        path
+    )
+
+    text = path.read_text(
+        encoding="utf-8"
+    )
+
+    required_markers = [
+
+        "LTXVLatentUpsamplerModelLoader",
+
+        "LatentUpscaleModelLoader",
+
+        "apply_modern_compatibility",
+
+        "validate_modern_detailer",
+
+        "set_input_video",
+
+    ]
+
+    for marker in (
+        required_markers
+    ):
+
+        if marker not in text:
+
+            fail(
+                "Workflow adapter missing:\n"
+                f"{marker}"
+            )
+
+    print(
+        "OK   modern workflow adapter"
+    )
+
+
+def validate_executor():
+
+    path = (
+        PROJECT_ROOT
+        / "execution"
+        / "shot_executor.py"
+    )
+
+    check_file(
+        path
+    )
+
+    text = path.read_text(
+        encoding="utf-8"
+    )
+
+    required_markers = [
+
+        "_copy_raw_to_comfy_input",
+
+        "VHS_LoadVideo",
+
+        "execute_raw",
+
+        "execute_detailer",
+
+        "mark_raw_complete",
+
+        "mark_upscaled_complete",
+
+    ]
+
+    for marker in (
+        required_markers
+    ):
+
+        if marker not in text:
+
+            fail(
+                "ShotExecutor missing:\n"
+                f"{marker}"
+            )
+
+    print(
+        "OK   BASE→DETAILER physical handoff"
+    )
+
+
+def validate_model_lock(
+    lock,
+):
+
+    models = lock[
+        "models"
+    ]
+
+    required_model_keys = {
+
+        "ltx_q4",
+
+        "t5_q4",
+
+        "vae",
+
+        "ic_lora",
+
+        "spatial_upscaler",
+
+    }
+
+    missing = (
+        required_model_keys
+        - set(models)
+    )
+
+    if missing:
+
+        fail(
+            "Model lock missing:\n"
+            + "\n".join(
+                sorted(
+                    missing
+                )
+            )
+        )
+
+    for name, spec in (
+        models.items()
+    ):
+
+        if not spec.get(
+            "dataset"
+        ):
+
+            fail(
+                f"{name} has no dataset path."
+            )
+
+        if not spec.get(
+            "filename"
+        ):
+
+            fail(
+                f"{name} has no filename."
+            )
+
+        if not spec.get(
+            "target"
+        ):
+
+            fail(
+                f"{name} has no ComfyUI target."
+            )
+
+        print(
+            f"OK   model lock: {name}"
         )
 
 
@@ -775,7 +1086,7 @@ def validate_external_tools():
     ):
 
         print(
-            "WARNING ffmpeg not found"
+            "WARNING ffmpeg not found."
         )
 
     else:
@@ -799,13 +1110,17 @@ def main():
         "=" * 80
     )
 
+    lock = load_lock()
+
     validate_general_structure()
 
     validate_init_files()
 
-    lock = check_lock()
-
     validate_git_stack(
+        lock
+    )
+
+    validate_torch(
         lock
     )
 
@@ -813,17 +1128,25 @@ def main():
         lock
     )
 
-    validate_compatibility_sources()
+    validate_model_lock(
+        lock
+    )
+
+    validate_preflight_source()
+
+    validate_compatibility_source(
+        lock
+    )
+
+    validate_config_source(
+        lock
+    )
 
     validate_adapter()
 
     validate_executor()
 
     validate_workflows()
-
-    validate_models(
-        lock
-    )
 
     validate_external_tools()
 
@@ -833,7 +1156,7 @@ def main():
     )
 
     print(
-        "✅ FINAL MODERN PROJECT STRUCTURE VALIDATED"
+        "✅ FINAL MODERN PROJECT VALIDATION PASSED"
     )
 
     print(
@@ -841,31 +1164,33 @@ def main():
     )
 
     print(
-        "ComfyUI backend is commit-pinned."
+        "Single source of truth:"
     )
 
     print(
-        "Frontend is package-pinned."
+        "    kaggle/compatibility_lock.yaml"
     )
 
     print(
-        "No @latest frontend override is required."
+        "Deleted duplicate:"
     )
 
     print(
-        "LTX compatibility is explicitly represented."
+        "    kaggle/runtime_requirements.lock"
     )
 
     print(
-        "BASE and DETAILER workflows are both validated."
+        "Frontend is pinned; "
+        "no @latest override is required."
     )
 
     print(
-        "Package __init__.py files are present."
+        "BASE + DETAILER + compatibility "
+        "architecture is represented."
     )
 
     print(
-        "=" * 80
+        "All package __init__.py files are present."
     )
 
 
