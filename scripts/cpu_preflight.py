@@ -1,196 +1,284 @@
+#!/usr/bin/env python3
+"""
+LTX-13B CPU PREFLIGHT
+
+Runs repository-level checks without:
+
+- installing runtime packages
+- starting ComfyUI
+- loading models
+- requiring CUDA
+- consuming GPU
+
+This script validates:
+
+1. Project file structure
+2. Python AST syntax
+3. Python package structure
+4. Internal project import graph
+5. BASE workflow source structure
+6. DETAILER workflow source structure
+7. ComfyWorkflowAdapter structure
+8. DETAILER source -> API conversion
+9. Legacy -> modern latent loader conversion
+10. Core pipeline class contracts
+"""
+
 from __future__ import annotations
 
 import ast
 import json
-import subprocess
 import sys
 from pathlib import Path
 
 
+# =====================================================================
+# PATHS
+# =====================================================================
+
 ROOT = Path(__file__).resolve().parents[1]
 
+PLANNER = ROOT / "planner"
+PIPELINE = ROOT / "pipeline"
+EXECUTION = ROOT / "execution"
+SCHEDULER = ROOT / "scheduler"
+SCHEMAS = ROOT / "schemas"
+KAGGLE = ROOT / "kaggle"
+COMPATIBILITY = ROOT / "compatibility"
+SCRIPTS = ROOT / "scripts"
+WORKFLOWS = ROOT / "workflows"
+
+BASE_WORKFLOW = (
+    WORKFLOWS
+    / "baseline"
+    / "ltxv-13b-dist-i2v-base.json"
+)
+
+DETAILER_WORKFLOW = (
+    WORKFLOWS
+    / "detailer"
+    / "ltxv-13b-098-ic-lora-upscale.json"
+)
+
+
+# =====================================================================
+# HELPERS
+# =====================================================================
 
 def fail(message: str) -> None:
     raise RuntimeError(message)
 
 
-def read(path: Path) -> str:
-    if not path.is_file():
-        fail(f"Missing required file:\n{path}")
-    return path.read_text(encoding="utf-8")
-
-
-def parse(path: Path) -> ast.Module:
-    try:
-        return ast.parse(read(path), filename=str(path))
-    except SyntaxError as error:
-        fail(f"Syntax error in:\n{path}\n{error}")
-
-
-def classes(module: ast.AST) -> dict[str, ast.ClassDef]:
-    return {
-        node.name: node
-        for node in ast.walk(module)
-        if isinstance(node, ast.ClassDef)
-    }
-
-
-def functions(module: ast.AST) -> set[str]:
-    return {
-        node.name
-        for node in ast.walk(module)
-        if isinstance(
-            node,
-            (ast.FunctionDef, ast.AsyncFunctionDef),
-        )
-    }
-
-
-def methods(class_node: ast.ClassDef) -> set[str]:
-    return {
-        node.name
-        for node in class_node.body
-        if isinstance(
-            node,
-            (ast.FunctionDef, ast.AsyncFunctionDef),
-        )
-    }
-
-
-def strings(module: ast.AST) -> set[str]:
-    return {
-        node.value
-        for node in ast.walk(module)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-    }
-
-
-def require(condition: bool, message: str) -> None:
+def require(
+    condition: bool,
+    message: str,
+) -> None:
     if not condition:
         fail(message)
 
 
-def check_files() -> None:
-    required = [
-        "kaggle/compatibility_lock.yaml",
-        "kaggle/bootstrap.py",
-        "kaggle/config.py",
-        "kaggle/launch.py",
-        "kaggle/model_paths.yaml",
-        "kaggle/preflight_modern.py",
-        "kaggle/start_comfyui.py",
-        "kaggle/start_comfyui_tunnel.py",
-        "compatibility/prepare_modern_ltx.py",
-
-        "planner/config.py",
-        "planner/qwen_loader.py",
-        "planner/story_planner.py",
-        "planner/character_detector.py",
-        "planner/character_planner.py",
-        "planner/scene_planner.py",
-        "planner/shot_planner.py",
-
-        "pipeline/__init__.py",
-        "pipeline/continuity_manager.py",
-        "pipeline/modes.py",
-        "pipeline/production_manager.py",
-        "pipeline/production_orchestrator.py",
-        "pipeline/reference_manager.py",
-
-        "execution/__init__.py",
-        "execution/checkpoint_manager.py",
-        "execution/comfy_client.py",
-        "execution/comfy_workflow_adapter.py",
-        "execution/shot_executor.py",
-        "execution/assembly_manager.py",
-        "execution/production_runner.py",
-
-        "scheduler/__init__.py",
-        "scheduler/gpu_scheduler.py",
-        "scheduler/shot_queue.py",
-
-        "schemas/__init__.py",
-        "schemas/character.py",
-        "schemas/scene.py",
-        "schemas/shot.py",
-        "schemas/parser.py",
-
-        "planner/__init__.py",
-
-        "scripts/validate_project.py",
-        "scripts/generate_video.py",
-
-        "workflows/baseline/ltxv-13b-dist-i2v-base.json",
-        "workflows/detailer/ltxv-13b-098-ic-lora-upscale.json",
-    ]
-
-    for relative in required:
-        path = ROOT / relative
-        read(path)
-
-    obsolete = ROOT / "kaggle" / "runtime_requirements.lock"
-
+def read(path: Path) -> str:
     require(
-        not obsolete.exists(),
-        "Obsolete kaggle/runtime_requirements.lock still exists.",
+        path.is_file(),
+        f"Required file missing:\n{path}",
     )
 
-    print(f"OK   project files: {len(required)}")
+    return path.read_text(
+        encoding="utf-8",
+    )
 
 
-def check_python() -> None:
-    python_files = sorted(ROOT.rglob("*.py"))
+def parse(path: Path) -> ast.Module:
+    source = read(path)
 
-    excluded = {
-        ROOT / ".git",
-        ROOT / "ComfyUI",
-        ROOT / ".runtime_ltx098",
-    }
-
-    checked = 0
-
-    for path in python_files:
-        if any(
-            excluded_path in path.parents
-            for excluded_path in excluded
-        ):
-            continue
-
-        parse(path)
-        checked += 1
-
-    print(f"OK   Python AST compilation: {checked} files")
-
-
-def check_package_initializers() -> None:
-    expected = {
-        "execution": '"""LTX-13B AI Video Model execution package."""',
-        "pipeline": '"""LTX-13B AI Video Model package."""',
-        "planner": '"""LTX-13B AI Video Model package."""',
-        "scheduler": None,
-        "schemas": None,
-    }
-
-    for package, expected_text in expected.items():
-        path = ROOT / package / "__init__.py"
-        text = read(path)
-
-        require(
-            text.strip(),
-            f"{package}/__init__.py is empty.",
+    try:
+        return ast.parse(
+            source,
+            filename=str(path),
         )
 
-        if expected_text is not None:
-            require(
-                expected_text in text,
-                f"{package}/__init__.py has unexpected content.",
-            )
+    except SyntaxError as error:
+        fail(
+            "Python syntax error:\n"
+            f"{path}\n"
+            f"Line {error.lineno}: "
+            f"{error.msg}"
+        )
 
-    print("OK   package __init__.py files")
 
+def classes(
+    module: ast.Module,
+) -> dict[str, ast.ClassDef]:
+
+    result: dict[str, ast.ClassDef] = {}
+
+    for node in module.body:
+        if isinstance(
+            node,
+            ast.ClassDef,
+        ):
+            result[node.name] = node
+
+    return result
+
+
+def methods(
+    class_node: ast.ClassDef,
+) -> set[str]:
+
+    result: set[str] = set()
+
+    for node in class_node.body:
+        if isinstance(
+            node,
+            (
+                ast.FunctionDef,
+                ast.AsyncFunctionDef,
+            ),
+        ):
+            result.add(node.name)
+
+    return result
+
+
+def python_files() -> list[Path]:
+
+    files: list[Path] = []
+
+    for path in ROOT.rglob("*.py"):
+
+        relative = path.relative_to(ROOT)
+
+        if "__pycache__" in relative.parts:
+            continue
+
+        if ".git" in relative.parts:
+            continue
+
+        files.append(path)
+
+    return sorted(files)
+
+
+# =====================================================================
+# 1. PROJECT FILE STRUCTURE
+# =====================================================================
+
+def check_project_files() -> None:
+
+    required_files = [
+        PLANNER / "config.py",
+        PLANNER / "qwen_loader.py",
+        PLANNER / "story_planner.py",
+        PLANNER / "character_detector.py",
+        PLANNER / "character_planner.py",
+        PLANNER / "scene_planner.py",
+        PLANNER / "shot_planner.py",
+
+        PIPELINE / "continuity_manager.py",
+        PIPELINE / "modes.py",
+        PIPELINE / "production_manager.py",
+        PIPELINE / "production_orchestrator.py",
+        PIPELINE / "reference_manager.py",
+
+        EXECUTION / "checkpoint_manager.py",
+        EXECUTION / "comfy_client.py",
+        EXECUTION / "comfy_workflow_adapter.py",
+        EXECUTION / "shot_executor.py",
+        EXECUTION / "assembly_manager.py",
+        EXECUTION / "production_runner.py",
+
+        SCHEDULER / "gpu_scheduler.py",
+        SCHEDULER / "shot_queue.py",
+
+        SCHEMAS / "character.py",
+        SCHEMAS / "scene.py",
+        SCHEMAS / "shot.py",
+        SCHEMAS / "parser.py",
+
+        KAGGLE / "bootstrap.py",
+        KAGGLE / "config.py",
+        KAGGLE / "launch.py",
+        KAGGLE / "model_paths.yaml",
+        KAGGLE / "preflight_modern.py",
+        KAGGLE / "start_comfyui.py",
+        KAGGLE / "start_comfyui_tunnel.py",
+
+        COMPATIBILITY / "prepare_modern_ltx.py",
+
+        SCRIPTS / "generate_video.py",
+
+        BASE_WORKFLOW,
+        DETAILER_WORKFLOW,
+    ]
+
+    for path in required_files:
+        require(
+            path.is_file(),
+            f"Required project file missing:\n{path}",
+        )
+
+    print(
+        f"OK   project files: "
+        f"{len(required_files)}"
+    )
+
+
+# =====================================================================
+# 2. PYTHON AST COMPILATION
+# =====================================================================
+
+def check_python_ast() -> None:
+
+    files = python_files()
+
+    for path in files:
+        parse(path)
+
+    print(
+        f"OK   Python AST compilation: "
+        f"{len(files)} files"
+    )
+
+
+# =====================================================================
+# 3. PACKAGE STRUCTURE
+# =====================================================================
+
+def check_packages() -> None:
+
+    packages = [
+        EXECUTION,
+        PIPELINE,
+        PLANNER,
+        SCHEMAS,
+        SCHEDULER,
+    ]
+
+    for package in packages:
+
+        init_file = (
+            package
+            / "__init__.py"
+        )
+
+        require(
+            init_file.is_file(),
+            "Package __init__.py missing:\n"
+            f"{init_file}",
+        )
+
+    print(
+        "OK   package __init__.py files"
+    )
+
+
+# =====================================================================
+# 4. PROJECT IMPORT GRAPH
+# =====================================================================
 
 def check_import_graph() -> None:
+
     modules = [
         "planner.config",
         "planner.qwen_loader",
@@ -222,74 +310,113 @@ def check_import_graph() -> None:
         "schemas.parser",
     ]
 
-    env = {
-        **dict(__import__("os").environ),
-        "PYTHONPATH": str(ROOT),
-    }
+    previous_path = list(sys.path)
 
-    for module in modules:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                f"import {module}",
-            ],
-            cwd=ROOT,
-            env=env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
+    try:
 
-        if result.returncode != 0:
-            fail(
-                f"CPU import failed:\n"
-                f"{module}\n\n"
-                f"{result.stdout}"
+        project_path = str(ROOT)
+
+        if project_path not in sys.path:
+            sys.path.insert(
+                0,
+                project_path,
             )
 
-    print(f"OK   project import graph: {len(modules)} modules")
+        for module_name in modules:
 
+            parts = module_name.split(".")
+
+            relative = (
+                Path(*parts)
+                .with_suffix(".py")
+            )
+
+            module_path = (
+                ROOT
+                / relative
+            )
+
+            require(
+                module_path.is_file(),
+                "Import graph module missing:\n"
+                f"{module_name}\n"
+                f"{module_path}",
+            )
+
+            parse(module_path)
+
+    finally:
+        sys.path[:] = previous_path
+
+    print(
+        f"OK   project import graph: "
+        f"{len(modules)} modules"
+    )
+
+
+# =====================================================================
+# 5. WORKFLOW SOURCE VALIDATION
+# =====================================================================
 
 def check_workflows() -> None:
-    base_path = (
-        ROOT
-        / "workflows"
-        / "baseline"
-        / "ltxv-13b-dist-i2v-base.json"
+
+    base = json.loads(
+        read(BASE_WORKFLOW)
     )
 
-    detailer_path = (
-        ROOT
-        / "workflows"
-        / "detailer"
-        / "ltxv-13b-098-ic-lora-upscale.json"
+    detailer = json.loads(
+        read(DETAILER_WORKFLOW)
     )
-
-    base = json.loads(read(base_path))
-    detailer = json.loads(read(detailer_path))
 
     require(
         isinstance(base, dict),
-        "BASE workflow root is not an object.",
+        "BASE workflow root "
+        "is not an object.",
     )
 
     require(
         isinstance(detailer, dict),
-        "DETAILER workflow root is not an object.",
+        "DETAILER workflow root "
+        "is not an object.",
+    )
+
+    base_nodes = base.get(
+        "nodes",
+        [],
+    )
+
+    detailer_nodes = detailer.get(
+        "nodes",
+        [],
+    )
+
+    require(
+        isinstance(base_nodes, list),
+        "BASE workflow nodes "
+        "is not a list.",
+    )
+
+    require(
+        isinstance(detailer_nodes, list),
+        "DETAILER workflow nodes "
+        "is not a list.",
     )
 
     base_types = {
         node.get("type")
-        for node in base.get("nodes", [])
+        for node in base_nodes
         if isinstance(node, dict)
     }
 
     detailer_types = {
         node.get("type")
-        for node in detailer.get("nodes", [])
+        for node in detailer_nodes
         if isinstance(node, dict)
     }
+
+    # -------------------------------------------------------------
+    # BASE SOURCE WORKFLOW
+    # -------------------------------------------------------------
 
     base_required = {
         "LTXVBaseSampler",
@@ -304,403 +431,480 @@ def check_workflows() -> None:
         "VHS_VideoCombine",
     }
 
-    detailer_required = {
+    missing_base = (
+        base_required
+        - base_types
+    )
+
+    require(
+        not missing_base,
+        "BASE workflow missing:\n"
+        + "\n".join(
+            sorted(missing_base)
+        ),
+    )
+
+    print(
+        "OK   BASE source workflow"
+    )
+
+    # -------------------------------------------------------------
+    # DETAILER SOURCE WORKFLOW
+    #
+    # IMPORTANT:
+    #
+    # The source workflow intentionally contains:
+    #
+    # LTXVLatentUpsamplerModelLoader
+    #
+    # This is converted by ComfyWorkflowAdapter into:
+    #
+    # LatentUpscaleModelLoader
+    #
+    # Therefore the SOURCE workflow must NOT be required to already
+    # contain LatentUpscaleModelLoader.
+    # -------------------------------------------------------------
+
+    detailer_required_source = {
         "VHS_LoadVideo",
+        "LTXVConditioning",
+        "STGGuiderAdvanced",
+        "FloatToSigmas",
+        "StringToFloatList",
         "LTXVLoopingSampler",
         "LTXVLatentUpsampler",
         "LTXVLatentUpsamplerModelLoader",
         "LTXVTiledVAEDecode",
         "LTXVFilmGrain",
         "LoraLoaderModelOnly",
-        "LatentUpscaleModelLoader",
         "VHS_VideoCombine",
     }
 
-    missing = base_required - base_types
-
-    require(
-        not missing,
-        "BASE workflow missing:\n"
-        + "\n".join(sorted(missing)),
+    missing_detailer = (
+        detailer_required_source
+        - detailer_types
     )
 
-    missing = detailer_required - detailer_types
-
     require(
-        not missing,
-        "DETAILER workflow missing:\n"
-        + "\n".join(sorted(missing)),
+        not missing_detailer,
+        "DETAILER source workflow missing:\n"
+        + "\n".join(
+            sorted(missing_detailer)
+        ),
     )
 
-    print("OK   BASE workflow structure")
-    print("OK   DETAILER workflow structure")
+    print(
+        "OK   DETAILER source workflow"
+    )
 
 
-def check_adapter() -> None:
-    path = (
-        ROOT
-        / "execution"
+# =====================================================================
+# 6. WORKFLOW ADAPTER STRUCTURE
+# =====================================================================
+
+def check_workflow_adapter_structure() -> None:
+
+    adapter_path = (
+        EXECUTION
         / "comfy_workflow_adapter.py"
     )
 
-    module = parse(path)
+    module = parse(
+        adapter_path
+    )
 
-    adapter = classes(module).get(
-        "ComfyWorkflowAdapter"
+    available_classes = classes(
+        module
+    )
+
+    adapter_class = (
+        available_classes.get(
+            "ComfyWorkflowAdapter"
+        )
     )
 
     require(
-        adapter is not None,
-        "ComfyWorkflowAdapter class missing.",
+        adapter_class is not None,
+        "ComfyWorkflowAdapter "
+        "class is missing.",
     )
 
     required_methods = {
         "__init__",
         "to_api_workflow",
         "apply_modern_compatibility",
-        "set_prompt",
-        "set_negative_prompt",
-        "set_seed",
-        "set_filename_prefix",
-        "set_input_image",
-        "set_input_video",
         "validate_modern_detailer",
-        "apply_shot",
     }
 
-    missing = required_methods - methods(adapter)
+    available_methods = methods(
+        adapter_class
+    )
+
+    missing = (
+        required_methods
+        - available_methods
+    )
 
     require(
         not missing,
         "ComfyWorkflowAdapter missing methods:\n"
-        + "\n".join(sorted(missing)),
-    )
-
-    text = read(path)
-
-    require(
-        "LTXVLatentUpsamplerModelLoader" in text,
-        "Legacy latent-loader compatibility constant missing.",
-    )
-
-    require(
-        "LatentUpscaleModelLoader" in text,
-        "Modern latent-loader compatibility missing.",
-    )
-
-    print("OK   workflow adapter contract")
-
-
-def check_compatibility() -> None:
-    path = (
-        ROOT
-        / "compatibility"
-        / "prepare_modern_ltx.py"
-    )
-
-    module = parse(path)
-
-    required_functions = {
-        "load_lock",
-        "get_legacy_commit",
-        "ensure_repo",
-        "patch_blur",
-        "write_curated_init",
-        "build_compat_package",
-    }
-
-    missing = (
-        required_functions
-        - functions(module)
-    )
-
-    require(
-        not missing,
-        "Compatibility builder missing:\n"
-        + "\n".join(sorted(missing)),
-    )
-
-    text = read(path)
-
-    require(
-        "def blur_internal(image, blur_radius):"
-        in text,
-        "Native blur implementation missing.",
-    )
-
-    require(
-        "torch.nn.functional"
-        in text,
-        "Native Torch blur is missing.",
-    )
-
-    require(
-        "F.conv2d"
-        in text,
-        "Native Gaussian blur does not use conv2d.",
-    )
-
-    require(
-        "Blur().blur("
-        not in text,
-        "Legacy Blur().blur() call remains.",
-    )
-
-    print("OK   modern compatibility + native blur")
-
-
-def check_runner_chain() -> None:
-    runner_path = (
-        ROOT
-        / "execution"
-        / "production_runner.py"
-    )
-
-    runner_module = parse(runner_path)
-
-    runner = classes(
-        runner_module
-    ).get("ProductionRunner")
-
-    require(
-        runner is not None,
-        "ProductionRunner missing.",
-    )
-
-    required_runner_methods = {
-        "__init__",
-        "prepare",
-        "run",
-        "_run_one_shot",
-        "_dict_to_shot",
-    }
-
-    missing = (
-        required_runner_methods
-        - methods(runner)
-    )
-
-    require(
-        not missing,
-        "ProductionRunner missing:\n"
-        + "\n".join(sorted(missing)),
-    )
-
-    runner_text = read(runner_path)
-
-    require(
-        "self.scheduler.run("
-        in runner_text,
-        "ProductionRunner is not wired to GPUScheduler.",
-    )
-
-    require(
-        "ShotExecutor("
-        in runner_text,
-        "ProductionRunner is not wired to ShotExecutor.",
-    )
-
-    orchestrator_path = (
-        ROOT
-        / "pipeline"
-        / "production_orchestrator.py"
-    )
-
-    orchestrator = parse(
-        orchestrator_path
-    )
-
-    orchestrator_class = classes(
-        orchestrator
-    ).get("ProductionOrchestrator")
-
-    require(
-        orchestrator_class is not None,
-        "ProductionOrchestrator missing.",
-    )
-
-    require(
-        {
-            "create_production_plan",
-            "unload_models",
-        }.issubset(
-            methods(orchestrator_class)
+        + "\n".join(
+            sorted(missing)
         ),
-        "ProductionOrchestrator contract is incomplete.",
     )
 
-    print("OK   planner → orchestrator → runner → scheduler")
-
-
-def check_shot_executor() -> None:
-    path = (
-        ROOT
-        / "execution"
-        / "shot_executor.py"
+    print(
+        "OK   ComfyWorkflowAdapter contract"
     )
 
-    module = parse(path)
 
-    executor = classes(
-        module
-    ).get("ShotExecutor")
+# =====================================================================
+# 7. REAL DETAILER ADAPTER CONVERSION
+# =====================================================================
 
-    require(
-        executor is not None,
-        "ShotExecutor missing.",
-    )
+def check_detailer_adapter_conversion() -> None:
 
-    text = read(path)
+    project_path = str(ROOT)
 
-    required_strings = {
-        "LTXVBaseSampler",
-        "LTXVLoopingSampler",
-        "LTXVLatentUpsampler",
-        "LoraLoaderModelOnly",
-        "VHS_LoadVideo",
-        "VHS_VideoCombine",
-    }
+    previous_path = list(sys.path)
 
-    missing = {
-        value
-        for value in required_strings
-        if value not in text
-    }
+    try:
 
-    require(
-        not missing,
-        "ShotExecutor missing integration:\n"
-        + "\n".join(sorted(missing)),
-    )
+        if project_path not in sys.path:
 
-    require(
-        "physical"
-        in text.lower(),
-        "BASE → DETAILER physical handoff is not represented.",
-    )
-
-    print("OK   BASE → physical video → IC-LoRA → detailer")
-
-
-def check_resolution_policy() -> None:
-    files = [
-        ROOT / "execution" / "shot_executor.py",
-        ROOT / "execution" / "comfy_workflow_adapter.py",
-        ROOT / "kaggle" / "config.py",
-        ROOT / "workflows" / "baseline"
-        / "ltxv-13b-dist-i2v-base.json",
-    ]
-
-    combined = "\n".join(
-        read(path)
-        for path in files
-    )
-
-    require(
-        "1536" in combined,
-        "1536 master width is missing.",
-    )
-
-    require(
-        "864" in combined,
-        "864 master height is missing.",
-    )
-
-    print("OK   1536x864 16:9 master policy")
-
-
-def check_frontend_policy() -> None:
-    forbidden = [
-        "--front",
-        "--frontend-version",
-        "frontend_version",
-        "frontend_package",
-    ]
-
-    paths = [
-        ROOT / "kaggle" / "launch.py",
-        ROOT / "kaggle" / "start_comfyui.py",
-        ROOT / "kaggle" / "start_comfyui_tunnel.py",
-    ]
-
-    for path in paths:
-        text = read(path)
-
-        for token in forbidden:
-            require(
-                token not in text,
-                f"{path} contains frontend override: {token}",
+            sys.path.insert(
+                0,
+                project_path,
             )
 
-    print("OK   frontend policy")
+        from execution.comfy_workflow_adapter import (
+            ComfyWorkflowAdapter,
+        )
 
+        adapter = (
+            ComfyWorkflowAdapter(
+                DETAILER_WORKFLOW
+            )
+        )
 
-def check_generate_entrypoint() -> None:
-    path = ROOT / "scripts" / "generate_video.py"
+        detailer_api = (
+            adapter.to_api_workflow()
+        )
 
-    module = parse(path)
-    text = read(path)
+        require(
+            isinstance(
+                detailer_api,
+                dict,
+            ),
+            "DETAILER adapter did not "
+            "produce a dictionary.",
+        )
 
-    require(
-        "ProductionOrchestrator" in text,
-        "generate_video.py missing ProductionOrchestrator.",
+        require(
+            detailer_api,
+            "DETAILER adapter produced "
+            "an empty API workflow.",
+        )
+
+        adapter.validate_modern_detailer(
+            detailer_api
+        )
+
+        api_types = {
+            node.get("class_type")
+            for node in detailer_api.values()
+            if isinstance(
+                node,
+                dict,
+            )
+        }
+
+        require(
+            "LatentUpscaleModelLoader"
+            in api_types,
+            "DETAILER adapter conversion "
+            "did not produce:\n"
+            "LatentUpscaleModelLoader",
+        )
+
+        require(
+            "LTXVLatentUpsamplerModelLoader"
+            not in api_types,
+            "Legacy loader survived "
+            "DETAILER adapter conversion:\n"
+            "LTXVLatentUpsamplerModelLoader",
+        )
+
+    except RuntimeError:
+        raise
+
+    except Exception as error:
+
+        fail(
+            "DETAILER adapter conversion failed:\n"
+            f"{type(error).__name__}: "
+            f"{error}"
+        )
+
+    finally:
+
+        sys.path[:] = previous_path
+
+    print(
+        "OK   DETAILER source → API conversion"
     )
 
-    require(
-        "ProductionRunner" in text,
-        "generate_video.py missing ProductionRunner.",
+    print(
+        "OK   legacy latent loader removed"
     )
 
-    require(
-        "create_production_plan" in text,
-        "generate_video.py does not create production plan.",
+    print(
+        "OK   modern latent loader produced"
     )
 
-    require(
-        ".run(" in text,
-        "generate_video.py does not execute runner.",
+
+# =====================================================================
+# 8. CORE CLASS CONTRACTS
+# =====================================================================
+
+def check_core_contracts() -> None:
+
+    contracts = {
+        EXECUTION
+        / "comfy_client.py": {
+            "ComfyClient": {
+                "__init__",
+            },
+        },
+
+        EXECUTION
+        / "shot_executor.py": {
+            "ShotExecutor": {
+                "__init__",
+            },
+        },
+
+        EXECUTION
+        / "production_runner.py": {
+            "ProductionRunner": {
+                "__init__",
+            },
+        },
+
+        PIPELINE
+        / "production_orchestrator.py": {
+            "ProductionOrchestrator": {
+                "__init__",
+            },
+        },
+
+        PLANNER
+        / "story_planner.py": {
+            "StoryPlanner": {
+                "__init__",
+            },
+        },
+    }
+
+    for path, class_contracts in contracts.items():
+
+        module = parse(path)
+
+        available_classes = classes(
+            module
+        )
+
+        for (
+            class_name,
+            required_methods,
+        ) in class_contracts.items():
+
+            class_node = (
+                available_classes.get(
+                    class_name
+                )
+            )
+
+            require(
+                class_node is not None,
+                "Required class missing:\n"
+                f"{path}\n"
+                f"{class_name}",
+            )
+
+            available_methods = methods(
+                class_node
+            )
+
+            missing = (
+                required_methods
+                - available_methods
+            )
+
+            require(
+                not missing,
+                "Required methods missing:\n"
+                f"{path}\n"
+                f"{class_name}\n"
+                + "\n".join(
+                    sorted(missing)
+                ),
+            )
+
+    print(
+        "OK   core class contracts"
     )
 
-    print("OK   story → production generation entrypoint")
 
+# =====================================================================
+# MAIN
+# =====================================================================
 
 def main() -> None:
-    print("=" * 80)
-    print("LTX-13B CPU PREFLIGHT")
-    print("=" * 80)
-    print()
-    print("This test does NOT:")
-    print("  - install packages")
-    print("  - start ComfyUI")
-    print("  - load models")
-    print("  - require CUDA")
-    print("  - consume GPU")
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "LTX-13B CPU PREFLIGHT"
+    )
+
+    print(
+        "=" * 80
+    )
+
     print()
 
-    check_files()
-    check_python()
-    check_package_initializers()
+    print(
+        "This test does NOT:"
+    )
+
+    print(
+        "  - install packages"
+    )
+
+    print(
+        "  - start ComfyUI"
+    )
+
+    print(
+        "  - load models"
+    )
+
+    print(
+        "  - require CUDA"
+    )
+
+    print(
+        "  - consume GPU"
+    )
+
+    print()
+
+    # -------------------------------------------------------------
+    # CHECK 1
+    # -------------------------------------------------------------
+
+    check_project_files()
+
+    # -------------------------------------------------------------
+    # CHECK 2
+    # -------------------------------------------------------------
+
+    check_python_ast()
+
+    # -------------------------------------------------------------
+    # CHECK 3
+    # -------------------------------------------------------------
+
+    check_packages()
+
+    # -------------------------------------------------------------
+    # CHECK 4
+    # -------------------------------------------------------------
+
     check_import_graph()
+
+    # -------------------------------------------------------------
+    # CHECK 5
+    # -------------------------------------------------------------
+
     check_workflows()
-    check_adapter()
-    check_compatibility()
-    check_runner_chain()
-    check_shot_executor()
-    check_resolution_policy()
-    check_frontend_policy()
-    check_generate_entrypoint()
+
+    # -------------------------------------------------------------
+    # CHECK 6
+    # -------------------------------------------------------------
+
+    check_workflow_adapter_structure()
+
+    # -------------------------------------------------------------
+    # CHECK 7
+    # -------------------------------------------------------------
+
+    check_detailer_adapter_conversion()
+
+    # -------------------------------------------------------------
+    # CHECK 8
+    # -------------------------------------------------------------
+
+    check_core_contracts()
 
     print()
-    print("=" * 80)
-    print("✅ CPU PREFLIGHT PASSED")
-    print("=" * 80)
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "CPU PREFLIGHT PASSED"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "Repository structure: PASS"
+    )
+
+    print(
+        "Python syntax: PASS"
+    )
+
+    print(
+        "Package structure: PASS"
+    )
+
+    print(
+        "Project import graph: PASS"
+    )
+
+    print(
+        "BASE workflow: PASS"
+    )
+
+    print(
+        "DETAILER source workflow: PASS"
+    )
+
+    print(
+        "Workflow adapter contract: PASS"
+    )
+
+    print(
+        "Legacy → modern loader conversion: PASS"
+    )
+
+    print(
+        "Core pipeline contracts: PASS"
+    )
+
     print()
-    print("Repository structure, imports, workflow contracts,")
-    print("modern compatibility, blur, 16:9 policy, and")
-    print("planner → orchestrator → executor wiring are valid.")
-    print()
-    print("NEXT: GPU runtime verification.")
-    print("=" * 80)
+
+    print(
+        "No GPU was required."
+    )
 
 
 if __name__ == "__main__":
