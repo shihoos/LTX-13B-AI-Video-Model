@@ -314,15 +314,58 @@ def validate_runtime(lock: dict) -> None:
         fail(f"Materialized runtime cannot import torch/torchvision:\n{error}")
     if torch.__version__ != expected["torch"] or torchvision.__version__ != expected["torchvision"]:
         fail("Torch runtime does not match compatibility_lock.yaml.")
-    for package in (
-        lock["comfyui"]["frontend"]["package"],
-        lock["comfyui"]["workflow_templates"]["package"],
-        lock["comfyui"]["embedded_docs"]["package"],
-    ):
+    packages = {
+        lock["comfyui"]["frontend"]["package"]:
+            lock["comfyui"]["frontend"]["version"],
+        lock["comfyui"]["workflow_templates"]["package"]:
+            lock["comfyui"]["workflow_templates"]["version"],
+        lock["comfyui"]["embedded_docs"]["package"]:
+            lock["comfyui"]["embedded_docs"]["version"],
+        lock["comfyui"]["comfy_kitchen"]["package"]:
+            lock["comfyui"]["comfy_kitchen"]["version"],
+        lock["comfyui"]["comfy_aimdo"]["package"]:
+            lock["comfyui"]["comfy_aimdo"]["version"],
+        "torchsde": lock["python_runtime"]["torchsde"],
+        "spandrel": lock["python_runtime"]["spandrel"],
+        "av": lock["python_runtime"]["av"],
+        "gguf": lock["python_runtime"]["gguf"],
+    }
+    for package, expected_version in packages.items():
         try:
-            importlib.metadata.version(package)
+            actual_version = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
             fail(f"Materialized runtime is missing package: {package}")
+        if actual_version != expected_version:
+            fail(
+                f"Package version mismatch for {package}.\n"
+                f"Expected: {expected_version}\nActual:   {actual_version}"
+            )
+    expected_comfy = lock["comfyui"]["commit"]
+    actual_comfy = subprocess.check_output(
+        ["git", "-C", str(comfy), "rev-parse", "HEAD"], text=True
+    ).strip()
+    if actual_comfy != expected_comfy:
+        fail(
+            "ComfyUI revision mismatch.\n"
+            f"Expected: {expected_comfy}\nActual:   {actual_comfy}"
+        )
+    custom_root = comfy / "custom_nodes"
+    for name, spec in lock["custom_nodes"].items():
+        node = custom_root / name
+        if not node.is_dir():
+            fail(f"Materialized runtime is missing custom node: {name}")
+        actual = subprocess.check_output(
+            ["git", "-C", str(node), "rev-parse", "HEAD"], text=True
+        ).strip()
+        if actual != spec["commit"]:
+            fail(
+                f"Custom-node revision mismatch: {name}.\n"
+                f"Expected: {spec['commit']}\nActual:   {actual}"
+            )
+    for name, spec in lock["models"].items():
+        model = comfy / spec["target"]
+        if not model.is_file():
+            fail(f"Locked model is absent: {name}\n{model}")
     print("OK   materialized runtime lock")
 
 
