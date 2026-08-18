@@ -1,3 +1,42 @@
+#!/usr/bin/env python3
+
+"""
+LTX-13B COMPLETE PRODUCTION VIDEO GENERATOR
+
+Pipeline:
+
+    Story
+      ↓
+    ProductionOrchestrator
+      ↓
+    ProductionManager
+      ↓
+    ProductionRunner
+      ↓
+    BASE workflow
+      ↓
+    IC-LoRA / spatial detailer
+      ↓
+    Final assembly
+
+This script does NOT bootstrap ComfyUI.
+
+Runtime startup belongs to:
+
+    kaggle/launch.py
+
+Canonical local ComfyUI port:
+
+    8188
+
+Example:
+
+    python scripts/generate_video.py \
+        --story "A cinematic story..." \
+        --mode ai_story \
+        --gpu-url 0=http://127.0.0.1:8188
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -6,6 +45,10 @@ import sys
 
 from pathlib import Path
 
+
+# ======================================================================
+# PROJECT PATH
+# ======================================================================
 
 PROJECT_ROOT = (
     Path(__file__)
@@ -20,6 +63,10 @@ if str(PROJECT_ROOT) not in sys.path:
     )
 
 
+# ======================================================================
+# PROJECT IMPORTS
+# ======================================================================
+
 from execution.production_runner import (
     ProductionRunner,
 )
@@ -32,6 +79,10 @@ from pipeline.production_manager import (
     ProductionManager,
 )
 
+
+# ======================================================================
+# WORKFLOWS
+# ======================================================================
 
 BASE_WORKFLOW = (
     PROJECT_ROOT
@@ -48,11 +99,23 @@ DETAILER_WORKFLOW = (
 )
 
 
+# ======================================================================
+# CONSTANTS
+# ======================================================================
+
+CANONICAL_COMFYUI_PORT = 8188
+STALE_COMFYUI_PORT = 8219
+
+
+# ======================================================================
+# ARGUMENTS
+# ======================================================================
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Run the complete LTX-13B production pipeline:"
-            " planning → BASE → IC-LoRA/spatial detailer → assembly."
+            "Run the complete LTX-13B production pipeline: "
+            "planning → BASE → IC-LoRA/spatial detailer → assembly."
         )
     )
 
@@ -80,8 +143,9 @@ def parse_args():
         metavar="ID=URL",
         help=(
             "ComfyUI worker URL. Repeat for multiple GPUs. "
+            "Canonical local endpoint is port 8188. "
             "Example: "
-            "--gpu-url 0=http://127.0.0.1:8219"
+            "--gpu-url 0=http://127.0.0.1:8188"
         ),
     )
 
@@ -93,6 +157,32 @@ def parse_args():
     )
 
     return parser.parse_args()
+
+
+# ======================================================================
+# GPU URL PARSING
+# ======================================================================
+
+def validate_worker_url(url: str) -> None:
+    """
+    Reject the known stale local ComfyUI port.
+
+    Remote/tunnel URLs are allowed to use their own external
+    port, so only the known stale local endpoints are rejected.
+    """
+
+    stale_urls = (
+        "http://127.0.0.1:8219",
+        "http://localhost:8219",
+    )
+
+    if url in stale_urls:
+        raise ValueError(
+            "Stale ComfyUI port detected.\n"
+            f"Received: {url}\n"
+            f"Canonical local ComfyUI port: "
+            f"{CANONICAL_COMFYUI_PORT}"
+        )
 
 
 def parse_gpu_urls(
@@ -119,12 +209,16 @@ def parse_gpu_urls(
         url = url.strip().rstrip("/")
 
         try:
-            gpu_id = int(gpu_text)
+
+            gpu_id = int(
+                gpu_text
+            )
 
         except ValueError as error:
 
             raise ValueError(
-                f"GPU ID must be an integer: {gpu_text}"
+                "GPU ID must be an integer:\n"
+                f"{gpu_text}"
             ) from error
 
         if gpu_id < 0:
@@ -141,14 +235,20 @@ def parse_gpu_urls(
         ):
 
             raise ValueError(
-                "GPU URL must begin with http:// or https://:\n"
+                "GPU URL must begin with "
+                "http:// or https://:\n"
                 f"{url}"
             )
+
+        validate_worker_url(
+            url
+        )
 
         if gpu_id in result:
 
             raise ValueError(
-                f"GPU ID {gpu_id} was specified more than once."
+                f"GPU ID {gpu_id} "
+                "was specified more than once."
             )
 
         result[gpu_id] = url
@@ -162,94 +262,48 @@ def parse_gpu_urls(
     return result
 
 
-def validate_environment():
+# ======================================================================
+# ENVIRONMENT VALIDATION
+# ======================================================================
 
-    if not BASE_WORKFLOW.is_file():
+def validate_environment() -> None:
 
-        raise FileNotFoundError(
-            "BASE workflow missing:\n"
-            f"{BASE_WORKFLOW}"
-        )
-
-    if not DETAILER_WORKFLOW.is_file():
-
-        raise FileNotFoundError(
-            "DETAILER workflow missing:\n"
-            f"{DETAILER_WORKFLOW}"
-        )
-
-
-def main():
-
-    args = parse_args()
-
-    validate_environment()
-
-    gpu_urls = parse_gpu_urls(
-        args.gpu_url
+    required_files = (
+        BASE_WORKFLOW,
+        DETAILER_WORKFLOW,
     )
 
-    print(
-        "=" * 80
-    )
-    print(
-        "LTX-13B COMPLETE PRODUCTION PIPELINE"
-    )
-    print(
-        "=" * 80
-    )
+    for path in required_files:
 
-    print(
-        f"Project: {PROJECT_ROOT}"
-    )
+        if not path.is_file():
 
-    print(
-        f"Story mode: {args.mode}"
-    )
-
-    print(
-        "GPU workers:"
-    )
-
-    for gpu_id, url in sorted(
-        gpu_urls.items()
-    ):
-
-        print(
-            f"  GPU {gpu_id}: {url}"
-        )
-
-    # ---------------------------------------------------------
-    # 1. PLANNING
-    # ---------------------------------------------------------
-
-    print()
-    print(
-        "=" * 80
-    )
-    print(
-        "STEP 1 — PRODUCTION PLANNING"
-    )
-    print(
-        "=" * 80
-    )
-
-    orchestrator = (
-        ProductionOrchestrator()
-    )
-
-    try:
-
-        production_plan = (
-            orchestrator.create_production_plan(
-                mode=args.mode,
-                user_input=args.story,
+            raise FileNotFoundError(
+                "Required workflow is missing:\n"
+                f"{path}"
             )
+
+    obsolete_model_paths = (
+        PROJECT_ROOT
+        / "kaggle"
+        / "model_paths.yaml"
+    )
+
+    if obsolete_model_paths.exists():
+
+        raise RuntimeError(
+            "Obsolete kaggle/model_paths.yaml "
+            "must not exist.\n"
+            "Use kaggle/compatibility_lock.yaml."
         )
 
-    finally:
 
-        orchestrator.unload_models()
+# ======================================================================
+# PRODUCTION PLAN VALIDATION
+# ======================================================================
+
+def validate_production_plan(
+    production_plan,
+) -> list:
 
     if not isinstance(
         production_plan,
@@ -281,8 +335,95 @@ def main():
             "Production planner returned zero shots."
         )
 
+    return shots
+
+
+# ======================================================================
+# MAIN
+# ======================================================================
+
+def main():
+
+    args = parse_args()
+
+    validate_environment()
+
+    gpu_urls = parse_gpu_urls(
+        args.gpu_url
+    )
+
     print(
-        f"✅ Production plan created: "
+        "=" * 80
+    )
+
+    print(
+        "LTX-13B COMPLETE PRODUCTION PIPELINE"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"Project: {PROJECT_ROOT}"
+    )
+
+    print(
+        f"Story mode: {args.mode}"
+    )
+
+    print(
+        "GPU workers:"
+    )
+
+    for gpu_id, url in sorted(
+        gpu_urls.items()
+    ):
+
+        print(
+            f"  GPU {gpu_id}: {url}"
+        )
+
+    # ==============================================================
+    # STEP 1 — PLANNING
+    # ==============================================================
+
+    print()
+    print(
+        "=" * 80
+    )
+
+    print(
+        "STEP 1 — PRODUCTION PLANNING"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    orchestrator = (
+        ProductionOrchestrator()
+    )
+
+    try:
+
+        production_plan = (
+            orchestrator.create_production_plan(
+                mode=args.mode,
+                user_input=args.story,
+            )
+        )
+
+    finally:
+
+        orchestrator.unload_models()
+
+    shots = validate_production_plan(
+        production_plan
+    )
+
+    print(
+        f"Production plan created: "
         f"{len(shots)} shots"
     )
 
@@ -293,17 +434,19 @@ def main():
         ),
     )
 
-    # ---------------------------------------------------------
-    # 2. PIPELINE CONFIGURATION
-    # ---------------------------------------------------------
+    # ==============================================================
+    # STEP 2 — PIPELINE CONFIGURATION
+    # ==============================================================
 
     print()
     print(
         "=" * 80
     )
+
     print(
         "STEP 2 — PIPELINE CONFIGURATION"
     )
+
     print(
         "=" * 80
     )
@@ -312,27 +455,40 @@ def main():
         ProductionManager()
     )
 
+    pipeline = (
+        manager.get_pipeline()
+    )
+
+    if not pipeline:
+
+        raise RuntimeError(
+            "ProductionManager returned "
+            "an empty pipeline."
+        )
+
     print(
         "Configured pipeline:"
     )
 
-    for stage in manager.get_pipeline():
+    for stage in pipeline:
 
         print(
             f"  → {stage}"
         )
 
-    # ---------------------------------------------------------
-    # 3. EXECUTION
-    # ---------------------------------------------------------
+    # ==============================================================
+    # STEP 3 — GPU EXECUTION
+    # ==============================================================
 
     print()
     print(
         "=" * 80
     )
+
     print(
         "STEP 3 — GPU EXECUTION"
     )
+
     print(
         "=" * 80
     )
@@ -352,6 +508,21 @@ def main():
         production_plan
     )
 
+    # ==============================================================
+    # STEP 4 — RESULT VALIDATION
+    # ==============================================================
+
+    if final_video is None:
+
+        raise RuntimeError(
+            "ProductionRunner returned "
+            "no final video path."
+        )
+
+    final_video = Path(
+        final_video
+    )
+
     if not final_video.exists():
 
         raise RuntimeError(
@@ -360,9 +531,23 @@ def main():
             f"{final_video}"
         )
 
-    # ---------------------------------------------------------
-    # 4. RESULT
-    # ---------------------------------------------------------
+    if not final_video.is_file():
+
+        raise RuntimeError(
+            "Final video path is not a file:\n"
+            f"{final_video}"
+        )
+
+    if final_video.stat().st_size <= 0:
+
+        raise RuntimeError(
+            "Final video exists but is empty:\n"
+            f"{final_video}"
+        )
+
+    # ==============================================================
+    # RESULT METADATA
+    # ==============================================================
 
     result = {
         "status": "completed",
@@ -379,6 +564,9 @@ def main():
         ),
         "gpu_workers": gpu_urls,
         "story_mode": args.mode,
+        "comfyui_local_port": (
+            CANONICAL_COMFYUI_PORT
+        ),
     }
 
     if args.output_json is not None:
@@ -405,19 +593,29 @@ def main():
             f"Metadata: {output_path}"
         )
 
+    # ==============================================================
+    # FINAL
+    # ==============================================================
+
     print()
     print(
         "=" * 80
     )
+
     print(
         "🎉 PRODUCTION COMPLETE"
     )
+
     print(
         "=" * 80
     )
 
     print(
         f"Final video:\n{final_video}"
+    )
+
+    print(
+        f"Size: {final_video.stat().st_size:,} bytes"
     )
 
 
