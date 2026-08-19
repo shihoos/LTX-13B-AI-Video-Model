@@ -1070,7 +1070,6 @@ def validate_compatibility_builder() -> None:
         "compatibility_lock.yaml",
         "legacy_ltx_098_compat",
         "runtime_package",
-        "LTX098ModernCompat",
         "blur_internal",
         "native torch",
     }
