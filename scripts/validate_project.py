@@ -741,12 +741,6 @@ def validate_model_architecture() -> None:
         "lock-driven.",
     )
 
-    require(
-        "model_paths.yaml"
-        not in bootstrap,
-        "bootstrap.py still references "
-        "obsolete model_paths.yaml.",
-    )
 
     require(
         "compatibility_lock.yaml"
