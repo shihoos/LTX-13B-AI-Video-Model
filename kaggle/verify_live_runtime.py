@@ -15,7 +15,7 @@ This verifier checks:
 4. Required node registrations
 5. Locked model filenames
 6. Modern latent upscaler
-7. Absence of legacy latent loader
+7. Required legacy LTX compatibility loader
 """
 
 from __future__ import annotations
