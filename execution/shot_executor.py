@@ -193,10 +193,10 @@ class ShotExecutor:
                 )
             )
 
-         self.workflow_adapter.set_input_image(
-            workflow,
-            reference_name,
-         )
+            self.workflow_adapter.set_input_image(
+               workflow,
+               reference_name,
+            )
 
         print(
             f"[{shot.shot_id}] "
