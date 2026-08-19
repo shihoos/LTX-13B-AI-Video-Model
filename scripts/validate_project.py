@@ -1457,14 +1457,35 @@ def validate_cpu_preflight() -> None:
         CPU_PREFLIGHT
     )
 
+    # IMPORTANT:
+    #
+    # cpu_preflight.py is responsible for:
+    #
+    # 1. Using compatibility_lock.yaml
+    # 2. Protecting against obsolete configuration files
+    # 3. Understanding the legacy DETAILER loader
+    # 4. Understanding the modern DETAILER loader
+    # 5. Understanding the canonical/stale ComfyUI port policy
+    #
+    # The actual adapter implementation contracts
+    # "apply_modern_compatibility" and
+    # "validate_modern_detailer" belong to
+    # execution/comfy_workflow_adapter.py.
+    #
+    # They are therefore validated by:
+    #
+    #     validate_adapter()
+    #     validate_real_detailer_conversion()
+    #
+    # They must NOT be required literally inside
+    # cpu_preflight.py.
+
     required = {
         "compatibility_lock.yaml",
         "model_paths.yaml",
         "runtime_requirements.lock",
         "LTXVLatentUpsamplerModelLoader",
         "LatentUpscaleModelLoader",
-        "apply_modern_compatibility",
-        "validate_modern_detailer",
     }
 
     for text in (
@@ -1478,8 +1499,67 @@ def validate_cpu_preflight() -> None:
             f"{text}",
         )
 
+    # ------------------------------------------------------------------------
+    # CPU preflight must explicitly protect against the obsolete files.
+    # ------------------------------------------------------------------------
+
+    require(
+        "exists()"
+        in source,
+        "cpu_preflight.py does not "
+        "perform obsolete-file existence checks.",
+    )
+
+    require(
+        "model_paths.yaml"
+        in source,
+        "cpu_preflight.py does not "
+        "check obsolete model_paths.yaml.",
+    )
+
+    require(
+        "runtime_requirements.lock"
+        in source,
+        "cpu_preflight.py does not "
+        "check obsolete runtime_requirements.lock.",
+    )
+
+    # ------------------------------------------------------------------------
+    # Port policy
+    #
+    # 8188 = canonical active local ComfyUI port.
+    #
+    # 8219 = known stale port that generate_video.py must reject.
+    # ------------------------------------------------------------------------
+
+    require(
+        str(
+            CANONICAL_COMFYUI_PORT
+        )
+        in source,
+        "cpu_preflight.py does not "
+        "know canonical ComfyUI port 8188.",
+    )
+
+    require(
+        str(
+            STALE_COMFYUI_PORT
+        )
+        in source,
+        "cpu_preflight.py does not "
+        "know stale ComfyUI port 8219.",
+    )
+
     print(
         "OK   CPU preflight contract"
+    )
+
+    print(
+        "OK   CPU preflight obsolete-file protection"
+    )
+
+    print(
+        "OK   CPU preflight port-policy contract"
     )
 
 
