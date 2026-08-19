@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import queue
 import re
@@ -9,8 +11,13 @@ import sys
 import threading
 import time
 import urllib.request
+
 from pathlib import Path
 
+
+# ============================================================================
+# PROJECT
+# ============================================================================
 
 PROJECT_ROOT = (
     Path(__file__).resolve().parents[1]
@@ -43,15 +50,78 @@ CLOUDFLARED_PATH = (
     / "cloudflared"
 )
 
-CLOUDFLARED_URL = (
-    "https://github.com/cloudflare/"
-    "cloudflared/releases/latest/"
-    "download/cloudflared-linux-amd64"
+LOCK_FILE = (
+    PROJECT_ROOT
+    / "kaggle"
+    / "compatibility_lock.yaml"
 )
 
 URL_PATTERN = re.compile(
     r"https://[a-zA-Z0-9-]+\.trycloudflare\.com"
 )
+
+
+# ============================================================================
+# HELPERS
+# ============================================================================
+
+def fail(
+    message: str,
+) -> None:
+
+    raise RuntimeError(
+        message
+    )
+
+
+def load_lock() -> dict:
+
+    try:
+
+        import yaml
+
+    except ImportError as error:
+
+        fail(
+            "PyYAML is required to read "
+            "compatibility_lock.yaml.\n"
+            f"{error}"
+        )
+
+    if not LOCK_FILE.is_file():
+
+        fail(
+            "Compatibility lock not found:\n"
+            f"{LOCK_FILE}"
+        )
+
+    try:
+
+        data = yaml.safe_load(
+            LOCK_FILE.read_text(
+                encoding="utf-8"
+            )
+        )
+
+    except Exception as error:
+
+        fail(
+            "Could not parse "
+            "compatibility_lock.yaml:\n"
+            f"{error}"
+        )
+
+    if not isinstance(
+        data,
+        dict,
+    ):
+
+        fail(
+            "compatibility_lock.yaml "
+            "must contain a mapping."
+        )
+
+    return data
 
 
 def stream(
@@ -85,24 +155,279 @@ def stream(
         )
 
 
-def ensure_cloudflared():
+# ============================================================================
+# CLOUDFLARED
+# ============================================================================
 
-    if not CLOUDFLARED_PATH.exists():
+def get_cloudflared_config(
+    lock: dict,
+) -> dict:
+
+    comfy = lock.get(
+        "comfyui"
+    )
+
+    if not isinstance(
+        comfy,
+        dict,
+    ):
+
+        fail(
+            "compatibility_lock.yaml "
+            "has no valid comfyui section."
+        )
+
+    config = comfy.get(
+        "cloudflared"
+    )
+
+    if not isinstance(
+        config,
+        dict,
+    ):
+
+        fail(
+            "compatibility_lock.yaml "
+            "has no valid comfyui.cloudflared section."
+        )
+
+    required = (
+        "version",
+        "asset",
+        "url",
+        "sha256",
+    )
+
+    for field in required:
+
+        value = config.get(
+            field
+        )
+
+        if not isinstance(
+            value,
+            str,
+        ) or not value.strip():
+
+            fail(
+                "Missing cloudflared lock field:\n"
+                f"comfyui.cloudflared.{field}"
+            )
+
+    if config["asset"] != (
+        "cloudflared-linux-amd64"
+    ):
+
+        fail(
+            "Unsupported cloudflared asset:\n"
+            f"{config['asset']}\n"
+            "Expected: cloudflared-linux-amd64"
+        )
+
+    if len(
+        config["sha256"]
+    ) != 64:
+
+        fail(
+            "cloudflared SHA-256 must "
+            "contain 64 hexadecimal characters."
+        )
+
+    try:
+
+        int(
+            config["sha256"],
+            16,
+        )
+
+    except ValueError as error:
+
+        fail(
+            "cloudflared SHA-256 is not valid "
+            "hexadecimal."
+        )
+
+    return config
+
+
+def sha256_file(
+    path: Path,
+) -> str:
+
+    digest = hashlib.sha256()
+
+    with path.open(
+        "rb"
+    ) as file:
+
+        for chunk in iter(
+            lambda: file.read(
+                1024 * 1024
+            ),
+            b"",
+        ):
+
+            digest.update(
+                chunk
+            )
+
+    return digest.hexdigest()
+
+
+def ensure_cloudflared(
+    lock: dict,
+) -> None:
+
+    config = get_cloudflared_config(
+        lock
+    )
+
+    expected_sha256 = (
+        config["sha256"]
+        .lower()
+    )
+
+    # ------------------------------------------------------------------------
+    # Existing binary
+    # ------------------------------------------------------------------------
+
+    if CLOUDFLARED_PATH.is_file():
+
+        actual = sha256_file(
+            CLOUDFLARED_PATH
+        ).lower()
+
+        if actual == expected_sha256:
+
+            os.chmod(
+                CLOUDFLARED_PATH,
+                0o755,
+            )
+
+            print(
+                "✅ cloudflared verified"
+            )
+
+            print(
+                f"   version: {config['version']}"
+            )
+
+            print(
+                f"   sha256:  {actual}"
+            )
+
+            return
 
         print(
-            "Downloading cloudflared..."
+            "⚠️ Existing cloudflared checksum "
+            "does not match the locked binary."
         )
 
-        urllib.request.urlretrieve(
-            CLOUDFLARED_URL,
-            CLOUDFLARED_PATH,
+        print(
+            f"   expected: {expected_sha256}"
         )
+
+        print(
+            f"   actual:   {actual}"
+        )
+
+        CLOUDFLARED_PATH.unlink()
+
+    # ------------------------------------------------------------------------
+    # Download exact locked release
+    # ------------------------------------------------------------------------
+
+    print(
+        "Downloading locked cloudflared..."
+    )
+
+    print(
+        f"Version: {config['version']}"
+    )
+
+    print(
+        f"URL: {config['url']}"
+    )
+
+    temporary_path = (
+        PROJECT_ROOT
+        / "cloudflared.download"
+    )
+
+    if temporary_path.exists():
+
+        temporary_path.unlink()
+
+    try:
+
+        urllib.request.urlretrieve(
+            config["url"],
+            temporary_path,
+        )
+
+    except Exception as error:
+
+        if temporary_path.exists():
+
+            temporary_path.unlink()
+
+        fail(
+            "Failed to download cloudflared:\n"
+            f"{error}"
+        )
+
+    actual = sha256_file(
+        temporary_path
+    ).lower()
+
+    if actual != expected_sha256:
+
+        temporary_path.unlink()
+
+        fail(
+            "cloudflared SHA-256 verification failed.\n"
+            f"Expected: {expected_sha256}\n"
+            f"Actual:   {actual}"
+        )
+
+    temporary_path.replace(
+        CLOUDFLARED_PATH
+    )
 
     os.chmod(
         CLOUDFLARED_PATH,
         0o755,
     )
 
+    # Final verification after rename.
+    final_hash = sha256_file(
+        CLOUDFLARED_PATH
+    ).lower()
+
+    if final_hash != expected_sha256:
+
+        CLOUDFLARED_PATH.unlink()
+
+        fail(
+            "cloudflared final verification failed."
+        )
+
+    print(
+        "✅ cloudflared downloaded and verified"
+    )
+
+    print(
+        f"   version: {config['version']}"
+    )
+
+    print(
+        f"   sha256:  {final_hash}"
+    )
+
+
+# ============================================================================
+# COMFYUI
+# ============================================================================
 
 def start_comfyui():
 
@@ -116,10 +441,6 @@ def start_comfyui():
             f"{COMFYUI_DIR}"
         )
 
-    # IMPORTANT:
-    # Do not pass --front-end-version @latest.
-    # The exact frontend package has already been pinned
-    # by the modern v0.33.1 requirements.
     command = [
         sys.executable,
         "main.py",
@@ -208,6 +529,10 @@ def wait_for_comfyui(
     )
 
 
+# ============================================================================
+# TUNNEL
+# ============================================================================
+
 def start_tunnel():
 
     process = subprocess.Popen(
@@ -291,6 +616,10 @@ def wait_for_url(
     )
 
 
+# ============================================================================
+# CLEANUP
+# ============================================================================
+
 def terminate(
     process,
 ):
@@ -316,6 +645,10 @@ def terminate(
         process.kill()
 
 
+# ============================================================================
+# MAIN
+# ============================================================================
+
 def main():
 
     comfy = None
@@ -323,7 +656,11 @@ def main():
 
     try:
 
-        ensure_cloudflared()
+        lock = load_lock()
+
+        ensure_cloudflared(
+            lock
+        )
 
         comfy = (
             start_comfyui()
@@ -365,6 +702,11 @@ def main():
         print(
             "Public:",
             public_url,
+        )
+
+        print(
+            "Cloudflared:",
+            "locked + SHA-256 verified",
         )
 
         print(
