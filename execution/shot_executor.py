@@ -193,22 +193,10 @@ class ShotExecutor:
                 )
             )
 
-            try:
-
-                self.workflow_adapter.set_input_image(
-                    workflow,
-                    reference_name,
-                )
-
-            except RuntimeError as error:
-
-                # If this particular workflow does not use
-                # LoadImage, references are simply ignored.
-                print(
-                    f"[{shot.shot_id}] "
-                    f"Reference copied but workflow "
-                    f"has no LoadImage node: {error}"
-                )
+         self.workflow_adapter.set_input_image(
+            workflow,
+            reference_name,
+         )
 
         print(
             f"[{shot.shot_id}] "
