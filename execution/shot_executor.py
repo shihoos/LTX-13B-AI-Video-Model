@@ -135,19 +135,19 @@ class ShotExecutor:
         # a normal metadata-preserving copy.
         if not destination.exists():
 
-          try:
+            try:
 
-            os.link(
-            raw_path,
-            destination,
-          )
+                os.link(
+                    raw_path,
+                    destination,
+                )
 
-         except OSError:
+            except OSError:
 
-            shutil.copy2(
-            raw_path,
-            destination,
-         )
+                shutil.copy2(
+                    raw_path,
+                    destination,
+                )
 
         return destination.name
 
@@ -278,11 +278,16 @@ class ShotExecutor:
             destination=destination,
         )
 
-        if not destination.exists():
+        if (
+            not destination.exists()
+            or not destination.is_file()
+            or destination.stat().st_size <= 0
+        ):
 
             raise RuntimeError(
                 f"[{shot.shot_id}] "
-                "Raw output download failed."
+                "Raw output download failed "
+                "or produced an empty file."
             )
 
         self.checkpoints.mark_raw_complete(
@@ -431,12 +436,17 @@ class ShotExecutor:
             destination=destination,
         )
 
-        if not destination.exists():
+        if (
+            not destination.exists()
+            or not destination.is_file()
+            or destination.stat().st_size <= 0
+        ):
 
             raise RuntimeError(
                 f"[{shot.shot_id}] "
                 "Detailer/upscale output "
-                "download failed."
+                "download failed or produced "
+                "an empty file."
             )
 
         self.checkpoints.mark_upscaled_complete(
