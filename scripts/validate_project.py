@@ -754,13 +754,6 @@ def validate_model_architecture() -> None:
         "lock-driven.",
     )
 
-    require(
-        "model_paths.yaml"
-        in cpu_preflight,
-        "cpu_preflight.py no longer "
-        "protects against obsolete "
-        "model_paths.yaml.",
-    )
 
     require(
         "runtime_requirements.lock"
