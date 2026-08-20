@@ -133,28 +133,21 @@ class ShotExecutor:
         # If hard linking is unavailable, for example because
         # the paths are on different filesystems, fall back to
         # a normal metadata-preserving copy.
-        if destination.exists():
+        if not destination.exists():
+
+          try:
+
+            os.link(
+            raw_path,
+            destination,
+          )
+
+         except OSError:
 
             shutil.copy2(
-                raw_path,
-                destination,
-            )
-
-        else:
-
-            try:
-
-                os.link(
-                    raw_path,
-                    destination,
-                )
-
-            except OSError:
-
-                shutil.copy2(
-                    raw_path,
-                    destination,
-                )
+            raw_path,
+            destination,
+         )
 
         return destination.name
 
