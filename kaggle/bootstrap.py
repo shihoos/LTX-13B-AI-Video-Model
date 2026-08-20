@@ -431,9 +431,9 @@ def install_locked_torch(
             "--upgrade",
             "--index-url",
             index_url,
-            torch_version,
-            torchvision_version,
-            torchaudio_version,
+            f"torch=={torch_version}",
+            f"torchvision=={torchvision_version}",
+            f"torchaudio=={torchaudio_version}",
         ]
     )
 
