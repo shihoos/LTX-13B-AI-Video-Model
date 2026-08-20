@@ -10,6 +10,15 @@
 # The versions below describe the environment that passed
 # the final Kaggle CPU/GPU compatibility tests.
 
+runtime:
+  network:
+    host: "127.0.0.1"
+    base_port: 8188
+    port_strategy: "base_port_plus_gpu_id"
+    protocol: "http"
+    stale_ports:
+      - 8219
+      
 comfyui:
   repository: https://github.com/Comfy-Org/ComfyUI.git
 
