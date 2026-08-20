@@ -788,6 +788,10 @@ def main():
         lock
     )
 
+    patch_active_ltxvideo(
+        project
+    )
+    
     package = build_compat_package(
         project,
         lock,
