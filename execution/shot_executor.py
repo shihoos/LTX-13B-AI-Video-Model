@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import os
 from pathlib import Path
 import shutil
 
@@ -124,10 +127,34 @@ class ShotExecutor:
             )
         )
 
-        shutil.copy2(
-            raw_path,
-            destination,
-        )
+        # A hard link avoids copying the entire raw video when
+        # source and destination are on the same filesystem.
+        #
+        # If hard linking is unavailable, for example because
+        # the paths are on different filesystems, fall back to
+        # a normal metadata-preserving copy.
+        if destination.exists():
+
+            shutil.copy2(
+                raw_path,
+                destination,
+            )
+
+        else:
+
+            try:
+
+                os.link(
+                    raw_path,
+                    destination,
+                )
+
+            except OSError:
+
+                shutil.copy2(
+                    raw_path,
+                    destination,
+                )
 
         return destination.name
 
@@ -194,8 +221,8 @@ class ShotExecutor:
             )
 
             self.workflow_adapter.set_input_image(
-               workflow,
-               reference_name,
+                workflow,
+                reference_name,
             )
 
         print(
