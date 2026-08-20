@@ -158,7 +158,7 @@ def main():
     print()
 
     print(
-        "STEP 1 — REPOSITORY / GPU PREFLIGHT"
+        "STEP 1 — EXACT RUNTIME BOOTSTRAP"
     )
 
     run_checked(
@@ -168,7 +168,7 @@ def main():
     print()
 
     print(
-        "STEP 2 — EXACT RUNTIME BOOTSTRAP"
+        "STEP 2 — REPOSITORY / GPU PREFLIGHT" 
     )
 
     run_checked(
