@@ -38,11 +38,6 @@ comfyui:
     package: comfy-aimdo
     version: 0.4.13
 
-  cloudflared:
-    version: 2026.7.3
-    asset: cloudflared-linux-amd64
-    url: https://github.com/cloudflare/cloudflared/releases/download/2026.7.3/cloudflared-linux-amd64
-    sha256: 9d71c677db00134c1bd4144b7783486b654ad281b1ea62b4972098d19f770f17
 
 python_runtime:
 
