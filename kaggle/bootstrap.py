@@ -685,6 +685,37 @@ def verify_runtime(
             f"Actual:   {actual_torchvision}"
         )
 
+    try:
+
+    import torchaudio
+
+    actual_torchaudio = (
+        torchaudio.__version__
+    )
+
+    except Exception as error:
+    
+    raise RuntimeError(
+        "Could not import torchaudio.\n"
+        f"{error}"
+    ) from error
+
+    if (
+        actual_torchaudio
+        != expected_torchaudio
+        ):
+
+    raise RuntimeError(
+        "Torchaudio version mismatch.\n"
+        f"Expected: {expected_torchaudio}\n"
+        f"Actual:   {actual_torchaudio}"
+    )
+
+print(
+    "Torchaudio:",
+    actual_torchaudio,
+)
+    
     for index in range(
         torch.cuda.device_count()
     ):
