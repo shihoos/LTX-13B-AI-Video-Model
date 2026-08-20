@@ -8,6 +8,7 @@ on:
       - "hardening/**"
       - "feature/**"
       - "fix/**"
+
   pull_request:
     branches:
       - main
@@ -36,7 +37,7 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          
+
       - name: Show environment
         run: |
           python --version
@@ -90,6 +91,7 @@ jobs:
               "detailer_compat",
               "models",
               "validation",
+              "runtime",
           }
 
           missing = required_sections - set(data)
@@ -100,7 +102,55 @@ jobs:
                   + ", ".join(sorted(missing))
               )
 
+          runtime = data["runtime"]
+
+          if not isinstance(runtime, dict):
+              raise SystemExit(
+                  "runtime section must contain a mapping"
+              )
+
+          network = runtime.get("network")
+
+          if not isinstance(network, dict):
+              raise SystemExit(
+                  "runtime.network section must contain a mapping"
+              )
+
+          if network.get("host") != "127.0.0.1":
+              raise SystemExit(
+                  "runtime.network.host must be 127.0.0.1"
+              )
+
+          if network.get("base_port") != 8188:
+              raise SystemExit(
+                  "runtime.network.base_port must be 8188"
+              )
+
+          if network.get("port_strategy") != "base_port_plus_gpu_id":
+              raise SystemExit(
+                  "runtime.network.port_strategy must be "
+                  "base_port_plus_gpu_id"
+              )
+
+          if network.get("protocol") != "http":
+              raise SystemExit(
+                  "runtime.network.protocol must be http"
+              )
+
+          stale_ports = network.get("stale_ports")
+
+          if not isinstance(stale_ports, list):
+              raise SystemExit(
+                  "runtime.network.stale_ports must be a list"
+              )
+
+          if 8219 not in stale_ports:
+              raise SystemExit(
+                  "runtime.network.stale_ports must contain 8219"
+              )
+
           print("Compatibility lock: OK")
+          print("Runtime/network contract: OK")
           PY
 
       - name: Validate all workflow JSON files
