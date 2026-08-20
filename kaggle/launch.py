@@ -99,9 +99,6 @@ def start_comfyui_worker(
         "COMFYUI_HOST"
     ] = COMFYUI_HOST
 
-    environment[
-        "COMFYUI_PORT"
-    ] = str(port)
 
     environment[
         "COMFYUI_GPU_ID"
