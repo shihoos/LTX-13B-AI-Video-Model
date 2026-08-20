@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.metadata
 import os
 import sys
 from pathlib import Path
@@ -114,25 +113,45 @@ def verify_gpu(
         "torch"
     ]
 
+    # Convert PyTorch build tag such as:
+    #
+    #     2.10.0+cu128
+    #
+    # into:
+    #
+    #     12.8
+    #
+    # so it can be compared with:
+    #
+    #     torch.version.cuda -> "12.8"
+
     expected_cuda = None
 
     if "+cu" in expected_torch:
-        cuda_tag = expected_torch.split(
-            "+cu", 1
-        )[1]
+
+        cuda_tag = (
+            expected_torch
+            .split(
+                "+cu",
+                1,
+            )[1]
+        )
 
         if len(cuda_tag) >= 3:
+
             expected_cuda = (
                 f"{cuda_tag[:-1]}."
                 f"{cuda_tag[-1]}"
             )
 
     print(
-        f"✅ PyTorch: {torch.__version__}"
+        f"✅ PyTorch: "
+        f"{torch.__version__}"
     )
 
     print(
-        f"✅ CUDA build: {torch.version.cuda}"
+        f"✅ CUDA build: "
+        f"{torch.version.cuda}"
     )
 
     print(
@@ -154,8 +173,10 @@ def verify_gpu(
 
         raise RuntimeError(
             "PyTorch version mismatch.\n"
-            f"Expected from lock: {expected_torch}\n"
-            f"Actual: {torch.__version__}"
+            f"Expected from lock: "
+            f"{expected_torch}\n"
+            f"Actual: "
+            f"{torch.__version__}"
         )
 
     if (
@@ -168,8 +189,10 @@ def verify_gpu(
 
         raise RuntimeError(
             "CUDA runtime mismatch.\n"
-            f"Expected family: CUDA {expected_cuda}\n"
-            f"Actual: CUDA {torch.version.cuda}"
+            f"Expected family: "
+            f"CUDA {expected_cuda}\n"
+            f"Actual: CUDA "
+            f"{torch.version.cuda}"
         )
 
     expected_torchvision = runtime[
@@ -205,8 +228,18 @@ def verify_gpu(
         f"{torchvision.__version__}"
     )
 
-    for index in range(
+    gpu_count = (
         torch.cuda.device_count()
+    )
+
+    if gpu_count == 0:
+
+        raise RuntimeError(
+            "No CUDA GPU detected."
+        )
+
+    for index in range(
+        gpu_count
     ):
 
         props = (
@@ -222,139 +255,8 @@ def verify_gpu(
             f"{props.total_memory / (1024**3):.2f} GB"
         )
 
-    if torch.cuda.device_count() == 0:
 
-        raise RuntimeError(
-            "No CUDA GPU detected."
-        )
-
-
-
-    comfy = lock[
-        "comfyui"
-    ]
-
-    runtime = lock[
-        "python_runtime"
-    ]
-
-    expected = {
-
-        comfy[
-            "frontend"
-        ][
-            "package"
-        ]:
-            comfy[
-                "frontend"
-            ][
-                "version"
-            ],
-
-        comfy[
-            "workflow_templates"
-        ][
-            "package"
-        ]:
-            comfy[
-                "workflow_templates"
-            ][
-                "version"
-            ],
-
-        comfy[
-            "embedded_docs"
-        ][
-            "package"
-        ]:
-            comfy[
-                "embedded_docs"
-            ][
-                "version"
-            ],
-
-        comfy[
-            "comfy_kitchen"
-        ][
-            "package"
-        ]:
-            comfy[
-                "comfy_kitchen"
-            ][
-                "version"
-            ],
-
-        comfy[
-            "comfy_aimdo"
-        ][
-            "package"
-        ]:
-            comfy[
-                "comfy_aimdo"
-            ][
-                "version"
-            ],
-
-        "torchsde":
-            runtime[
-                "torchsde"
-            ],
-
-        "spandrel":
-            runtime[
-                "spandrel"
-            ],
-
-        "av":
-            runtime[
-                "av"
-            ],
-
-        "gguf":
-            runtime[
-                "gguf"
-            ],
-    }
-
-    for (
-        package,
-        expected_version,
-    ) in expected.items():
-
-        try:
-
-            actual = (
-                importlib.metadata
-                .version(
-                    package
-                )
-            )
-
-        except importlib.metadata.PackageNotFoundError:
-
-            raise RuntimeError(
-                "Missing locked package:\n"
-                f"{package}=={expected_version}"
-            )
-
-        if (
-            actual
-            != expected_version
-        ):
-
-            raise RuntimeError(
-                f"{package} version mismatch.\n"
-                f"Expected: {expected_version}\n"
-                f"Actual:   {actual}"
-            )
-
-        print(
-            f"✅ {package}=={actual}"
-        )
-
-
-def verify_project(
-):
+def verify_project():
 
     if not PROJECT.exists():
 
@@ -390,6 +292,11 @@ def main():
         f"✅ Python: "
         f"{sys.version.split()[0]}"
     )
+
+    # Pre-bootstrap checks only.
+    #
+    # These must validate the environment that already exists
+    # before bootstrap.py installs the exact locked packages.
 
     verify_gpu(
         lock
@@ -435,13 +342,13 @@ def main():
     )
 
     print(
-        "All runtime versions are sourced "
-        "from compatibility_lock.yaml."
+        "Pre-bootstrap GPU/runtime checks passed."
     )
 
     print(
-        "No duplicated ComfyUI/frontend version "
-        "pins are used by this preflight."
+        "Exact package installation and "
+        "post-install verification are handled "
+        "by bootstrap.py."
     )
 
 
