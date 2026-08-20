@@ -114,12 +114,18 @@ def verify_gpu(
         "torch"
     ]
 
-    expected_cuda = (
-        expected_torch
-        .split("+cu", 1)[1]
-        if "+cu" in expected_torch
-        else None
-    )
+        expected_cuda = None
+
+    if "+cu" in expected_torch:
+        cuda_tag = expected_torch.split(
+            "+cu", 1
+        )[1]
+
+        if len(cuda_tag) >= 3:
+            expected_cuda = (
+                f"{cuda_tag[:-1]}."
+                f"{cuda_tag[-1]}"
+            )
 
     print(
         f"✅ PyTorch: {torch.__version__}"
