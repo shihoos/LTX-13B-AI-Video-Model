@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import time
 import uuid
@@ -16,12 +18,32 @@ from urllib.request import (
 )
 
 
+# ============================================================================
+# TRANSIENT HTTP ERRORS
+# ============================================================================
+
+TRANSIENT_HTTP_STATUS_CODES = {
+    408,
+    425,
+    429,
+    500,
+    502,
+    503,
+    504,
+}
+
+
+# ============================================================================
+# COMFYUI CLIENT
+# ============================================================================
+
 class ComfyClient:
 
     def __init__(
         self,
         base_url: str,
         timeout: int = 30,
+        request_retries: int = 3,
     ):
 
         self.base_url = (
@@ -30,11 +52,21 @@ class ComfyClient:
 
         self.timeout = timeout
 
+        self.request_retries = max(
+            0,
+            request_retries,
+        )
+
+    # ========================================================================
+    # HTTP REQUEST
+    # ========================================================================
+
     def _request(
         self,
         method: str,
         path: str,
         payload=None,
+        retry: bool = False,
     ):
 
         url = (
@@ -58,74 +90,161 @@ class ComfyClient:
                 "Content-Type"
             ] = "application/json"
 
-        request = Request(
-            url=url,
-            method=method,
-            data=data,
-            headers=headers,
+        attempts = (
+            self.request_retries + 1
+            if retry
+            else 1
         )
 
-        try:
+        for attempt in range(
+            attempts
+        ):
 
-            with urlopen(
-                request,
-                timeout=self.timeout,
-            ) as response:
+            request = Request(
+                url=url,
+                method=method,
+                data=data,
+                headers=headers,
+            )
 
-                body = (
-                    response.read()
-                )
+            try:
 
-                if not body:
-                    return None
+                with urlopen(
+                    request,
+                    timeout=self.timeout,
+                ) as response:
 
-                content_type = (
-                    response.headers.get(
-                        "Content-Type",
-                        "",
+                    body = (
+                        response.read()
                     )
-                )
 
-                if (
-                    "application/json"
-                    in content_type
-                ):
+                    if not body:
 
-                    return json.loads(
-                        body.decode(
-                            "utf-8"
+                        return None
+
+                    content_type = (
+                        response.headers.get(
+                            "Content-Type",
+                            "",
                         )
                     )
 
-                return body
+                    if (
+                        "application/json"
+                        in content_type
+                    ):
 
-        except HTTPError as error:
+                        return json.loads(
+                            body.decode(
+                                "utf-8"
+                            )
+                        )
 
-            body = error.read().decode(
-                "utf-8",
-                errors="replace",
-            )
+                    return body
 
-            raise RuntimeError(
-                f"ComfyUI HTTP {error.code}: "
-                f"{body}"
-            ) from error
+            except HTTPError as error:
 
-        except URLError as error:
+                body = error.read().decode(
+                    "utf-8",
+                    errors="replace",
+                )
 
-            raise RuntimeError(
-                f"Cannot connect to ComfyUI "
-                f"at {self.base_url}: "
-                f"{error}"
-            ) from error
+                if (
+                    retry
+                    and
+                    error.code
+                    in TRANSIENT_HTTP_STATUS_CODES
+                    and
+                    attempt
+                    < attempts - 1
+                ):
 
-    def health_check(self) -> bool:
+                    self._sleep_before_retry(
+                        attempt
+                    )
+
+                    continue
+
+                raise RuntimeError(
+                    f"ComfyUI HTTP "
+                    f"{error.code}: "
+                    f"{body}"
+                ) from error
+
+            except URLError as error:
+
+                if (
+                    retry
+                    and
+                    attempt
+                    < attempts - 1
+                ):
+
+                    self._sleep_before_retry(
+                        attempt
+                    )
+
+                    continue
+
+                raise RuntimeError(
+                    "Cannot connect to ComfyUI "
+                    f"at {self.base_url}: "
+                    f"{error}"
+                ) from error
+
+            except TimeoutError as error:
+
+                if (
+                    retry
+                    and
+                    attempt
+                    < attempts - 1
+                ):
+
+                    self._sleep_before_retry(
+                        attempt
+                    )
+
+                    continue
+
+                raise RuntimeError(
+                    "ComfyUI request timed out "
+                    f"at {self.base_url}: "
+                    f"{error}"
+                ) from error
+
+    # ========================================================================
+    # RETRY BACKOFF
+    # ========================================================================
+
+    @staticmethod
+    def _sleep_before_retry(
+        attempt: int,
+    ) -> None:
+
+        delay = min(
+            1.0 * (2 ** attempt),
+            10.0,
+        )
+
+        time.sleep(
+            delay
+        )
+
+    # ========================================================================
+    # HEALTH CHECK
+    # ========================================================================
+
+    def health_check(
+        self,
+    ) -> bool:
 
         try:
 
             self._request(
                 "GET",
                 "/system_stats",
+                retry=True,
             )
 
             return True
@@ -133,6 +252,10 @@ class ComfyClient:
         except Exception:
 
             return False
+
+    # ========================================================================
+    # QUEUE PROMPT
+    # ========================================================================
 
     def queue_prompt(
         self,
@@ -151,11 +274,30 @@ class ComfyClient:
             "client_id": client_id,
         }
 
+        # IMPORTANT:
+        #
+        # Do NOT retry POST /prompt automatically.
+        #
+        # A retry could submit the same generation twice if ComfyUI
+        # accepted the request but the connection failed before the
+        # response reached this client.
+
         result = self._request(
             "POST",
             "/prompt",
             payload,
+            retry=False,
         )
+
+        if not isinstance(
+            result,
+            dict,
+        ):
+
+            raise RuntimeError(
+                "ComfyUI returned an invalid "
+                "response to /prompt."
+            )
 
         prompt_id = (
             result.get(
@@ -172,15 +314,36 @@ class ComfyClient:
 
         return prompt_id
 
+    # ========================================================================
+    # HISTORY
+    # ========================================================================
+
     def get_history(
         self,
         prompt_id: str,
     ) -> dict:
 
-        return self._request(
+        result = self._request(
             "GET",
             f"/history/{prompt_id}",
+            retry=True,
         )
+
+        if not isinstance(
+            result,
+            dict,
+        ):
+
+            raise RuntimeError(
+                "ComfyUI returned an invalid "
+                "history response."
+            )
+
+        return result
+
+    # ========================================================================
+    # WAIT FOR PROMPT
+    # ========================================================================
 
     def wait_for_prompt(
         self,
@@ -189,15 +352,23 @@ class ComfyClient:
         timeout: float = 3600.0,
     ) -> dict:
 
-        started = time.time()
+        started = time.monotonic()
+
+        current_interval = max(
+            0.5,
+            poll_interval,
+        )
+
+        max_poll_interval = 10.0
 
         while True:
 
-            if (
-                time.time()
+            elapsed = (
+                time.monotonic()
                 - started
-                > timeout
-            ):
+            )
+
+            if elapsed > timeout:
 
                 raise TimeoutError(
                     f"ComfyUI prompt "
@@ -238,8 +409,17 @@ class ComfyClient:
                     return result
 
             time.sleep(
-                poll_interval
+                current_interval
             )
+
+            current_interval = min(
+                current_interval * 1.5,
+                max_poll_interval,
+            )
+
+    # ========================================================================
+    # DOWNLOAD FILE
+    # ========================================================================
 
     def download_file(
         self,
@@ -260,6 +440,7 @@ class ComfyClient:
         data = self._request(
             "GET",
             f"/view?{query}",
+            retry=True,
         )
 
         if not isinstance(
@@ -274,8 +455,8 @@ class ComfyClient:
 
         if destination is None:
 
-            destination = (
-                Path(filename)
+            destination = Path(
+                filename
             )
 
         destination = Path(
@@ -291,7 +472,23 @@ class ComfyClient:
             data
         )
 
+        if (
+            not destination.is_file()
+            or
+            destination.stat().st_size <= 0
+        ):
+
+            raise RuntimeError(
+                "Downloaded ComfyUI output "
+                "is missing or empty:\n"
+                f"{destination}"
+            )
+
         return destination
+
+    # ========================================================================
+    # FIND VIDEO OUTPUTS
+    # ========================================================================
 
     @staticmethod
     def find_video_outputs(
@@ -307,9 +504,23 @@ class ComfyClient:
             )
         )
 
+        if not isinstance(
+            outputs,
+            dict,
+        ):
+
+            return results
+
         for node_output in (
             outputs.values()
         ):
+
+            if not isinstance(
+                node_output,
+                dict,
+            ):
+
+                continue
 
             for key, value in (
                 node_output.items()
@@ -338,6 +549,7 @@ class ComfyClient:
                     )
 
                     if not filename:
+
                         continue
 
                     extension = (
