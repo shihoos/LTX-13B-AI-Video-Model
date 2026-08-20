@@ -204,7 +204,6 @@ MODERN_LATENT_LOADER = (
 )
 
 
-
 # ============================================================================
 # REQUIRED PROJECT FILES
 # ============================================================================
@@ -658,7 +657,6 @@ def validate_files() -> None:
             f"{path}",
         )
 
-
     print(
         "OK   repository file structure"
     )
@@ -716,7 +714,6 @@ def validate_model_architecture() -> None:
         "lock-driven.",
     )
 
-
     require(
         "compatibility_lock.yaml"
         in preflight,
@@ -725,7 +722,7 @@ def validate_model_architecture() -> None:
     )
 
     # ------------------------------------------------------------------------
-    # CPU preflight protects obsolete files
+    # CPU preflight must use lock
     # ------------------------------------------------------------------------
 
     require(
@@ -733,14 +730,6 @@ def validate_model_architecture() -> None:
         in cpu_preflight,
         "cpu_preflight.py is not "
         "lock-driven.",
-    )
-
-
-    require(
-        "runtime_requirements.lock"
-        in cpu_preflight,
-        "cpu_preflight.py no longer "
-        "runtime_requirements.lock.",
     )
 
     print(
@@ -835,6 +824,7 @@ def validate_workflows() -> None:
 
     # The source must remain legacy.
     # The adapter is responsible for conversion.
+
     require(
         MODERN_LATENT_LOADER
         not in detailer_types,
@@ -1099,6 +1089,7 @@ def validate_production_application() -> None:
 
     # 8219 is intentionally allowed ONLY
     # as a stale endpoint rejection guard.
+
     require(
         str(
             STALE_COMFYUI_PORT
@@ -1181,7 +1172,6 @@ def validate_kaggle_wiring() -> None:
         PREFLIGHT_MODERN
     )
 
-
     start_comfyui = read_text(
         START_COMFYUI
     )
@@ -1189,21 +1179,22 @@ def validate_kaggle_wiring() -> None:
     # ------------------------------------------------------------------------
     # launch.py
     #
-    # launch.py is the actual startup orchestrator:
+    # launch.py is the startup orchestrator:
     #
     #     preflight_modern.py
     #             ↓
     #         bootstrap.py
     #             ↓
-    #     start_comfyui_tunnel.py
+    #     start_comfyui.py
     #
-    # start_comfyui.py is only a compatibility wrapper into launch.py.
-    # Therefore the wrapper itself must NOT be required to contain 8188.
+    # ComfyUI runs locally on the canonical backend port 8188.
+    # No Cloudflare tunnel is required.
     # ------------------------------------------------------------------------
 
     for name in (
         "preflight_modern.py",
         "bootstrap.py",
+        "start_comfyui.py",
     ):
 
         require(
@@ -1213,14 +1204,16 @@ def validate_kaggle_wiring() -> None:
         )
 
     # ------------------------------------------------------------------------
-    # start_comfyui.py wrapper
+    # start_comfyui.py
     # ------------------------------------------------------------------------
 
     require(
-        "launch.py"
+        str(
+            CANONICAL_COMFYUI_PORT
+        )
         in start_comfyui,
-        "start_comfyui.py is not "
-        "wired to launch.py.",
+        "start_comfyui.py does not "
+        "use canonical ComfyUI port 8188.",
     )
 
     require(
@@ -1231,14 +1224,6 @@ def validate_kaggle_wiring() -> None:
         "start_comfyui.py contains "
         "stale port 8219.",
     )
-
-    # IMPORTANT:
-    #
-    # Do NOT check for 8188 in start_comfyui.py.
-    #
-    # The wrapper delegates to launch.py.
-    # The canonical port belongs to the actual
-    # ComfyUI launcher: start_comfyui_tunnel.py.
 
     # ------------------------------------------------------------------------
     # bootstrap.py
@@ -1251,7 +1236,6 @@ def validate_kaggle_wiring() -> None:
         "lock-driven.",
     )
 
-
     # ------------------------------------------------------------------------
     # modern preflight
     # ------------------------------------------------------------------------
@@ -1263,22 +1247,16 @@ def validate_kaggle_wiring() -> None:
         "lock-driven.",
     )
 
-
-
     print(
         "OK   Kaggle launcher/bootstrap wiring"
     )
 
     print(
-        "OK   start_comfyui.py -> launch.py wrapper"
+        "OK   start_comfyui.py canonical port 8188"
     )
 
     print(
-        "OK   launch.py -> preflight/bootstrap/tunnel"
-    )
-
-    print(
-        "OK   tunnel -> canonical ComfyUI port 8188"
+        "OK   launch.py -> preflight/bootstrap/start_comfyui"
     )
 
 
@@ -1392,10 +1370,9 @@ def validate_cpu_preflight() -> None:
     # cpu_preflight.py is responsible for:
     #
     # 1. Using compatibility_lock.yaml
-    # 2. Protecting against obsolete configuration files
-    # 3. Understanding the legacy DETAILER loader
-    # 4. Understanding the modern DETAILER loader
-    # 5. Understanding the canonical/stale ComfyUI port policy
+    # 2. Understanding the legacy DETAILER loader
+    # 3. Understanding the modern DETAILER loader
+    # 4. Understanding the canonical/stale ComfyUI port policy
     #
     # The actual adapter implementation contracts
     # "apply_modern_compatibility" and
@@ -1412,7 +1389,6 @@ def validate_cpu_preflight() -> None:
 
     required = {
         "compatibility_lock.yaml",
-        "runtime_requirements.lock",
         "LTXVLatentUpsamplerModelLoader",
         "LatentUpscaleModelLoader",
     }
@@ -1428,7 +1404,7 @@ def validate_cpu_preflight() -> None:
             f"{text}",
         )
 
-    # --------------------------------------------------------------
+    # ------------------------------------------------------------------------
     # Port policy
     #
     # 8188 = canonical active local ComfyUI port.
@@ -1459,10 +1435,6 @@ def validate_cpu_preflight() -> None:
     )
 
     print(
-        "OK   CPU preflight obsolete-file protection"
-    )
-
-    print(
         "OK   CPU preflight port-policy contract"
     )
 
@@ -1474,17 +1446,29 @@ def validate_cpu_preflight() -> None:
 def validate_port_contract() -> None:
 
     # ------------------------------------------------------------------------
-    # Tunnel
+    # ComfyUI launcher
     # ------------------------------------------------------------------------
 
+    start_comfyui = read_text(
+        START_COMFYUI
+    )
 
     require(
         str(
             CANONICAL_COMFYUI_PORT
         )
-        in tunnel,
+        in start_comfyui,
         "Canonical ComfyUI port 8188 "
-        "missing from tunnel script.",
+        "missing from start_comfyui.py.",
+    )
+
+    require(
+        str(
+            STALE_COMFYUI_PORT
+        )
+        not in start_comfyui,
+        "Stale ComfyUI port detected "
+        "in start_comfyui.py.",
     )
 
     # ------------------------------------------------------------------------
@@ -1932,6 +1916,7 @@ def validate_live_verifier_matches_runtime_contract() -> None:
 
     # Make sure the live verifier and this validator
     # agree on the canonical endpoint.
+
     require(
         'DEFAULT_URL = "http://127.0.0.1:8188"'
         in source,
@@ -1942,6 +1927,7 @@ def validate_live_verifier_matches_runtime_contract() -> None:
 
     # Make sure the live verifier checks the
     # modern loader rather than only the legacy one.
+
     require(
         MODERN_LATENT_LOADER
         in source,
@@ -1951,6 +1937,7 @@ def validate_live_verifier_matches_runtime_contract() -> None:
 
     # Make sure the live verifier performs
     # exact locked model checks.
+
     require(
         "require_choice("
         in source,
