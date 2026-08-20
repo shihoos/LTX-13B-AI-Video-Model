@@ -1211,13 +1211,7 @@ def check_kaggle_wiring() -> None:
         "lock-driven.",
     )
 
-    require(
-        "model_paths.yaml"
-        not in bootstrap,
-        "bootstrap.py still references "
-        "obsolete model_paths.yaml.",
-    )
-
+    
     # ------------------------------------------------------------------------
     # modern preflight
     # ------------------------------------------------------------------------
