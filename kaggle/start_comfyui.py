@@ -8,6 +8,10 @@ import time
 from pathlib import Path
 
 
+# ============================================================================
+# PROJECT
+# ============================================================================
+
 PROJECT_ROOT = (
     Path(__file__).resolve().parents[1]
 )
@@ -17,23 +21,84 @@ COMFYUI_DIR = (
     / "ComfyUI"
 )
 
+
+# ============================================================================
+# COMFYUI WORKER
+# ============================================================================
+
 HOST = os.getenv(
     "COMFYUI_HOST",
     "127.0.0.1",
 )
 
-PORT = int(
-    os.getenv(
-        "COMFYUI_PORT",
-        "8188",
-    )
-)
-
-GPU_ID = os.getenv(
+GPU_ID_TEXT = os.getenv(
     "COMFYUI_GPU_ID",
     "0",
 )
 
+try:
+
+    GPU_ID = int(
+        GPU_ID_TEXT
+    )
+
+except ValueError as error:
+
+    raise ValueError(
+        "COMFYUI_GPU_ID must be an integer:\n"
+        f"Received: {GPU_ID_TEXT}"
+    ) from error
+
+if GPU_ID < 0:
+
+    raise ValueError(
+        "COMFYUI_GPU_ID must be >= 0."
+    )
+
+
+# ============================================================================
+# CANONICAL PORT
+# ============================================================================
+#
+# GPU 0 -> 8188
+# GPU 1 -> 8189
+# GPU 2 -> 8190
+#
+# launch.py starts one worker per GPU.
+# This file is responsible for one worker only.
+# ============================================================================
+
+CANONICAL_COMFYUI_PORT = 8188
+
+PORT = (
+    CANONICAL_COMFYUI_PORT
+    + GPU_ID
+)
+
+
+# ============================================================================
+# RUNTIME FILES
+# ============================================================================
+
+LOG_DIR = (
+    PROJECT_ROOT
+    / ".runtime_kaggle"
+)
+
+LOG_FILE = (
+    LOG_DIR
+    / f"comfyui_gpu_{GPU_ID}_port_{PORT}.log"
+)
+
+PID_FILE = (
+    LOG_DIR
+    / f"comfyui_gpu_{GPU_ID}_port_{PORT}.pid"
+)
+
+
+# ============================================================================
+# PORT CHECK
+# ============================================================================
 
 def port_ready() -> bool:
 
@@ -53,6 +118,10 @@ def port_ready() -> bool:
 
         return False
 
+
+# ============================================================================
+# WAIT FOR COMFYUI
+# ============================================================================
 
 def wait_for_comfyui(
     process: subprocess.Popen,
@@ -76,7 +145,8 @@ def wait_for_comfyui(
                 f"GPU: {GPU_ID}\n"
                 f"Host: {HOST}\n"
                 f"Port: {PORT}\n"
-                f"Exit code: {process.returncode}"
+                f"Exit code: {process.returncode}\n"
+                f"Log: {LOG_FILE}"
             )
 
         if port_ready():
@@ -97,9 +167,14 @@ def wait_for_comfyui(
         f"{timeout} seconds.\n"
         f"GPU: {GPU_ID}\n"
         f"Host: {HOST}\n"
-        f"Port: {PORT}"
+        f"Port: {PORT}\n"
+        f"Log: {LOG_FILE}"
     )
 
+
+# ============================================================================
+# MAIN
+# ============================================================================
 
 def main():
 
@@ -115,6 +190,10 @@ def main():
             f"{main_py}"
         )
 
+    # ------------------------------------------------------------------------
+    # Do not start another worker if this worker's endpoint is already alive.
+    # ------------------------------------------------------------------------
+
     if port_ready():
 
         print(
@@ -122,7 +201,15 @@ def main():
             f"on {HOST}:{PORT}"
         )
 
+        print(
+            f"GPU: {GPU_ID}"
+        )
+
         return
+
+    # ------------------------------------------------------------------------
+    # ComfyUI command
+    # ------------------------------------------------------------------------
 
     command = [
         sys.executable,
@@ -171,25 +258,27 @@ def main():
         "=" * 80
     )
 
-    log_dir = (
-        PROJECT_ROOT
-        / ".runtime_kaggle"
-    )
+    # ------------------------------------------------------------------------
+    # Runtime directory
+    # ------------------------------------------------------------------------
 
-    log_dir.mkdir(
+    LOG_DIR.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    log_file = (
-        log_dir
-        / f"comfyui_gpu_{GPU_ID}_port_{PORT}.log"
-    )
+    # ------------------------------------------------------------------------
+    # Log
+    # ------------------------------------------------------------------------
 
-    log_handle = log_file.open(
+    log_handle = LOG_FILE.open(
         "a",
         encoding="utf-8",
     )
+
+    # ------------------------------------------------------------------------
+    # Start ComfyUI
+    # ------------------------------------------------------------------------
 
     process = subprocess.Popen(
         command,
@@ -200,12 +289,13 @@ def main():
         start_new_session=True,
     )
 
-    pid_file = (
-        log_dir
-        / f"comfyui_gpu_{GPU_ID}_port_{PORT}.pid"
-    )
+    log_handle.close()
 
-    pid_file.write_text(
+    # ------------------------------------------------------------------------
+    # PID
+    # ------------------------------------------------------------------------
+
+    PID_FILE.write_text(
         str(process.pid),
         encoding="utf-8",
     )
@@ -216,12 +306,16 @@ def main():
     )
 
     print(
-        f"ComfyUI log: {log_file}"
+        f"ComfyUI log: {LOG_FILE}"
     )
 
     print(
-        f"ComfyUI PID file: {pid_file}"
+        f"ComfyUI PID file: {PID_FILE}"
     )
+
+    # ------------------------------------------------------------------------
+    # Wait for readiness
+    # ------------------------------------------------------------------------
 
     try:
 
@@ -235,9 +329,18 @@ def main():
 
             process.terminate()
 
+        PID_FILE.unlink(
+            missing_ok=True
+        )
+
         raise
 
+    # ------------------------------------------------------------------------
+    # Ready
+    # ------------------------------------------------------------------------
+
     print()
+
     print(
         "✅ LOCAL COMFYUI BACKEND READY"
     )
