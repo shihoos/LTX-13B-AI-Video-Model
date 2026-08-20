@@ -101,10 +101,6 @@ def main():
     )
 
     print(
-        "Cloudflare: disabled"
-    )
-
-    print(
         "Browser: not required"
     )
 
