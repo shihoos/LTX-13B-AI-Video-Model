@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -58,12 +60,63 @@ def main():
         check=True,
     )
 
-    subprocess.run(
+    # Start ComfyUI + Cloudflare tunnel in the background.
+    process = subprocess.Popen(
         [
             sys.executable,
             str(TUNNEL),
         ],
-        check=True,
+        cwd=PROJECT,
+        start_new_session=True,
+    )
+
+    # Wait until ComfyUI is listening on port 8188.
+    deadline = (
+        time.time()
+        + 180
+    )
+
+    while time.time() < deadline:
+
+        if process.poll() is not None:
+
+            raise RuntimeError(
+                "ComfyUI/tunnel process exited "
+                f"with code {process.returncode}."
+            )
+
+        try:
+
+            with socket.create_connection(
+                (
+                    "127.0.0.1",
+                    8188,
+                ),
+                timeout=2,
+            ):
+
+                print()
+                print(
+                    "✅ ComfyUI is running on port 8188."
+                )
+                print(
+                    "✅ Background runtime started."
+                )
+                print(
+                    "✅ This Kaggle cell can now finish."
+                )
+
+                return
+
+        except OSError:
+
+            time.sleep(
+                2
+            )
+
+    raise TimeoutError(
+        "ComfyUI did not become ready "
+        "within 180 seconds."
     )
 
 
