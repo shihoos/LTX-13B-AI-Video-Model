@@ -29,12 +29,28 @@ Canonical local ComfyUI port:
 
     8188
 
+Default worker:
+
+    GPU 0 → http://127.0.0.1:8188
+
+Multiple workers can be supplied:
+
+    GPU 0 → http://127.0.0.1:8188
+    GPU 1 → http://127.0.0.1:8189
+
 Example:
 
     python scripts/generate_video.py \
         --story "A cinematic story..." \
+        --mode ai_story
+
+Multi-GPU example:
+
+    python scripts/generate_video.py \
+        --story "A cinematic story..." \
         --mode ai_story \
-        --gpu-url 0=http://127.0.0.1:8188
+        --gpu-url 0=http://127.0.0.1:8188 \
+        --gpu-url 1=http://127.0.0.1:8189
 """
 
 from __future__ import annotations
@@ -104,6 +120,7 @@ DETAILER_WORKFLOW = (
 # ======================================================================
 
 CANONICAL_COMFYUI_PORT = 8188
+
 STALE_COMFYUI_PORT = 8219
 
 
@@ -112,6 +129,7 @@ STALE_COMFYUI_PORT = 8219
 # ======================================================================
 
 def parse_args():
+
     parser = argparse.ArgumentParser(
         description=(
             "Run the complete LTX-13B production pipeline: "
@@ -139,11 +157,12 @@ def parse_args():
     parser.add_argument(
         "--gpu-url",
         action="append",
-        required=True,
+        default=None,
         metavar="ID=URL",
         help=(
             "ComfyUI worker URL. Repeat for multiple GPUs. "
-            "Canonical local endpoint is port 8188. "
+            "If omitted, GPU 0 uses the canonical local endpoint "
+            "http://127.0.0.1:8188. "
             "Example: "
             "--gpu-url 0=http://127.0.0.1:8188"
         ),
@@ -163,7 +182,9 @@ def parse_args():
 # GPU URL PARSING
 # ======================================================================
 
-def validate_worker_url(url: str) -> None:
+def validate_worker_url(
+    url: str,
+) -> None:
     """
     Reject the known stale local ComfyUI port.
 
@@ -177,6 +198,7 @@ def validate_worker_url(url: str) -> None:
     )
 
     if url in stale_urls:
+
         raise ValueError(
             "Stale ComfyUI port detected.\n"
             f"Received: {url}\n"
@@ -186,8 +208,15 @@ def validate_worker_url(url: str) -> None:
 
 
 def parse_gpu_urls(
-    values: list[str],
+    values: list[str] | None,
 ) -> dict[int, str]:
+
+    if values is None:
+
+        values = [
+            f"0=http://127.0.0.1:"
+            f"{CANONICAL_COMFYUI_PORT}"
+        ]
 
     result: dict[int, str] = {}
 
@@ -281,7 +310,6 @@ def validate_environment() -> None:
                 "Required workflow is missing:\n"
                 f"{path}"
             )
-
 
 
 # ======================================================================
@@ -551,9 +579,6 @@ def main():
         ),
         "gpu_workers": gpu_urls,
         "story_mode": args.mode,
-        "comfyui_local_port": (
-            CANONICAL_COMFYUI_PORT
-        ),
     }
 
     if args.output_json is not None:
