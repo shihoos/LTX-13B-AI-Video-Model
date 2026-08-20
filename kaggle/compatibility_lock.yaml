@@ -5,6 +5,7 @@
 # - ComfyUI support packages
 # - custom-node revisions
 # - LTX 0.9.8 compatibility source
+# - runtime/network configuration
 # - model locations
 #
 # The versions below describe the environment that passed
