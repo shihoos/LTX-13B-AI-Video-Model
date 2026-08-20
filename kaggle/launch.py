@@ -47,7 +47,7 @@ def main():
     subprocess.run(
         [
             sys.executable,
-            str(PREFLIGHT),
+            str(BOOTSTRAP),
         ],
         check=True,
     )
@@ -55,7 +55,7 @@ def main():
     subprocess.run(
         [
             sys.executable,
-            str(BOOTSTRAP),
+            str(PREFLIGHT),
         ],
         check=True,
     )
