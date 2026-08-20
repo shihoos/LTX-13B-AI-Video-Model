@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 
@@ -23,11 +21,25 @@ BOOTSTRAP = (
     / "bootstrap.py"
 )
 
-TUNNEL = (
+START_COMFYUI = (
     PROJECT
     / "kaggle"
-    / "start_comfyui_tunnel.py"
+    / "start_comfyui.py"
 )
+
+
+def run_checked(
+    script: Path,
+) -> None:
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(script),
+        ],
+        cwd=PROJECT,
+        check=True,
+    )
 
 
 def main():
@@ -44,79 +56,64 @@ def main():
         "=" * 80
     )
 
-    subprocess.run(
-        [
-            sys.executable,
-            str(BOOTSTRAP),
-        ],
-        check=True,
+    print()
+    print(
+        "STEP 1 — REPOSITORY / GPU PREFLIGHT"
     )
 
-    subprocess.run(
-        [
-            sys.executable,
-            str(PREFLIGHT),
-        ],
-        check=True,
+    run_checked(
+        PREFLIGHT
     )
 
-    # Start ComfyUI + Cloudflare tunnel in the background.
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            str(TUNNEL),
-        ],
-        cwd=PROJECT,
-        start_new_session=True,
+    print()
+    print(
+        "STEP 2 — EXACT RUNTIME BOOTSTRAP"
     )
 
-    # Wait until ComfyUI is listening on port 8188.
-    deadline = (
-        time.time()
-        + 180
+    run_checked(
+        BOOTSTRAP
     )
 
-    while time.time() < deadline:
+    print()
+    print(
+        "STEP 3 — START LOCAL COMFYUI BACKEND"
+    )
 
-        if process.poll() is not None:
+    run_checked(
+        START_COMFYUI
+    )
 
-            raise RuntimeError(
-                "ComfyUI/tunnel process exited "
-                f"with code {process.returncode}."
-            )
+    print()
+    print(
+        "=" * 80
+    )
 
-        try:
+    print(
+        "✅ LTX-13B BACKEND READY"
+    )
 
-            with socket.create_connection(
-                (
-                    "127.0.0.1",
-                    8188,
-                ),
-                timeout=2,
-            ):
+    print(
+        "=" * 80
+    )
 
-                print()
-                print(
-                    "✅ ComfyUI is running on port 8188."
-                )
-                print(
-                    "✅ Background runtime started."
-                )
-                print(
-                    "✅ This Kaggle cell can now finish."
-                )
+    print(
+        "ComfyUI API: http://127.0.0.1:8188"
+    )
 
-                return
+    print(
+        "Cloudflare: disabled"
+    )
 
-        except OSError:
+    print(
+        "Browser: not required"
+    )
 
-            time.sleep(
-                2
-            )
+    print(
+        "ComfyUI continues running in the background."
+    )
 
-    raise TimeoutError(
-        "ComfyUI did not become ready "
-        "within 180 seconds."
+    print(
+        "You can now run the generation cell."
     )
 
 
