@@ -229,9 +229,6 @@ def verify_gpu(
         )
 
 
-def verify_locked_packages(
-    lock,
-):
 
     comfy = lock[
         "comfyui"
