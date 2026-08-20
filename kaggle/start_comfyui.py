@@ -29,6 +29,11 @@ PORT = int(
     )
 )
 
+GPU_ID = os.getenv(
+    "COMFYUI_GPU_ID",
+    "0",
+)
+
 
 def port_ready() -> bool:
 
@@ -36,7 +41,7 @@ def port_ready() -> bool:
 
         with socket.create_connection(
             (
-                "127.0.0.1",
+                HOST,
                 PORT,
             ),
             timeout=2,
@@ -68,6 +73,9 @@ def wait_for_comfyui(
 
             raise RuntimeError(
                 "ComfyUI exited before becoming ready.\n"
+                f"GPU: {GPU_ID}\n"
+                f"Host: {HOST}\n"
+                f"Port: {PORT}\n"
                 f"Exit code: {process.returncode}"
             )
 
@@ -86,7 +94,10 @@ def wait_for_comfyui(
 
     raise TimeoutError(
         "ComfyUI did not become ready within "
-        f"{timeout} seconds."
+        f"{timeout} seconds.\n"
+        f"GPU: {GPU_ID}\n"
+        f"Host: {HOST}\n"
+        f"Port: {PORT}"
     )
 
 
@@ -120,6 +131,8 @@ def main():
         HOST,
         "--port",
         str(PORT),
+        "--cuda-device",
+        str(GPU_ID),
     ]
 
     print(
@@ -132,6 +145,10 @@ def main():
 
     print(
         "=" * 80
+    )
+
+    print(
+        f"GPU: {GPU_ID}"
     )
 
     print(
@@ -166,7 +183,7 @@ def main():
 
     log_file = (
         log_dir
-        / "comfyui.log"
+        / f"comfyui_gpu_{GPU_ID}_port_{PORT}.log"
     )
 
     log_handle = log_file.open(
@@ -185,7 +202,7 @@ def main():
 
     pid_file = (
         log_dir
-        / "comfyui.pid"
+        / f"comfyui_gpu_{GPU_ID}_port_{PORT}.pid"
     )
 
     pid_file.write_text(
@@ -200,6 +217,10 @@ def main():
 
     print(
         f"ComfyUI log: {log_file}"
+    )
+
+    print(
+        f"ComfyUI PID file: {pid_file}"
     )
 
     try:
@@ -220,12 +241,19 @@ def main():
     print(
         "✅ LOCAL COMFYUI BACKEND READY"
     )
+
     print(
-        f"API: http://127.0.0.1:{PORT}"
+        f"GPU: {GPU_ID}"
     )
+
+    print(
+        f"API: http://{HOST}:{PORT}"
+    )
+
     print(
         "The startup process can now exit."
     )
+
     print(
         "ComfyUI continues running in the background."
     )
