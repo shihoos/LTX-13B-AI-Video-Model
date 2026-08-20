@@ -997,7 +997,6 @@ def check_compatibility_builder() -> None:
         "runtime_package",
         "blur_internal",
         "native torch",
-        "LTX098ModernCompat",
     }
 
     for text in (
