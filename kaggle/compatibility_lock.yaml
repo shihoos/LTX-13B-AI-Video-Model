@@ -46,9 +46,6 @@ comfyui:
 
 python_runtime:
 
-  # These are provided by the Kaggle GPU image
-  # and are verified, not forcibly reinstalled.
-  python_runtime:
   # CUDA 13.0 tested successfully with the full
   # ComfyUI + LTX stack on 2 × Tesla T4.
   torch: 2.12.1+cu130
@@ -62,7 +59,6 @@ python_runtime:
   spandrel: 0.4.2
   av: 18.1.0
   gguf: 0.19.0
-
   
 
 custom_nodes:
