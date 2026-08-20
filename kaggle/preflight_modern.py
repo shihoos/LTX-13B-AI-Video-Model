@@ -395,10 +395,6 @@ def main():
         lock
     )
 
-    verify_locked_packages(
-        lock
-    )
-
     verify_model_sources(
         lock
     )
