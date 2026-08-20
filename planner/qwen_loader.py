@@ -52,13 +52,13 @@ class QwenStoryModel:
             "config.json",
             "model.safetensors.index.json",
         )
-    
+
         # ------------------------------------------------------------
-        # 1. Exact configured Kaggle path
+        # Exact Kaggle dataset path
         # ------------------------------------------------------------
-    
+
         if QWEN_KAGGLE_PATH.is_dir():
-    
+
             if all(
                 (
                     QWEN_KAGGLE_PATH
@@ -66,52 +66,36 @@ class QwenStoryModel:
                 ).is_file()
                 for filename in required_files
             ):
-    
+
                 return QWEN_KAGGLE_PATH
-    
-        # ------------------------------------------------------------
-        # 2. Recursive search inside the configured Kaggle dataset
-        # ------------------------------------------------------------
-    
-        if QWEN_KAGGLE_PATH.is_dir():
-    
-            candidates = []
-    
-            for config_path in QWEN_KAGGLE_PATH.rglob(
-                "config.json"
+
+            # --------------------------------------------------------
+            # Search recursively inside the attached Kaggle dataset.
+            # --------------------------------------------------------
+
+            for config_path in (
+                QWEN_KAGGLE_PATH.rglob(
+                    "config.json"
+                )
             ):
-    
-                model_root = (
+
+                model_path = (
                     config_path.parent
                 )
-    
+
                 if (
-                    model_root
+                    model_path
                     / "model.safetensors.index.json"
                 ).is_file():
-    
-                    candidates.append(
-                        model_root
-                    )
-    
-            if candidates:
-    
-                # Prefer the shallowest matching directory.
-                candidates.sort(
-                    key=lambda path: (
-                        len(path.parts),
-                        str(path),
-                    )
-                )
-    
-                return candidates[0]
-    
+
+                    return model_path
+
         # ------------------------------------------------------------
-        # 3. Local development path
+        # Local development path
         # ------------------------------------------------------------
-    
+
         if QWEN_LOCAL_PATH.is_dir():
-    
+
             if all(
                 (
                     QWEN_LOCAL_PATH
@@ -119,20 +103,20 @@ class QwenStoryModel:
                 ).is_file()
                 for filename in required_files
             ):
-    
+
                 return QWEN_LOCAL_PATH
 
         # ------------------------------------------------------------
-        # 4. Clear failure
+        # Model not found
         # ------------------------------------------------------------
-    
+
         raise FileNotFoundError(
             "Qwen model was not found.\n\n"
-            "Checked Kaggle dataset path:\n"
+            "Expected Kaggle dataset path:\n"
             f"{QWEN_KAGGLE_PATH}\n\n"
-            "Checked local development path:\n"
+            "Expected local development path:\n"
             f"{QWEN_LOCAL_PATH}\n\n"
-            "The Kaggle dataset must contain both:\n"
+            "The Qwen dataset must contain:\n"
             "  config.json\n"
             "  model.safetensors.index.json"
         )
