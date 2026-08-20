@@ -282,19 +282,6 @@ def validate_environment() -> None:
                 f"{path}"
             )
 
-    obsolete_model_paths = (
-        PROJECT_ROOT
-        / "kaggle"
-        / "model_paths.yaml"
-    )
-
-    if obsolete_model_paths.exists():
-
-        raise RuntimeError(
-            "Obsolete kaggle/model_paths.yaml "
-            "must not exist.\n"
-            "Use kaggle/compatibility_lock.yaml."
-        )
 
 
 # ======================================================================
