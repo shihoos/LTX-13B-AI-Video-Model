@@ -1201,6 +1201,70 @@ def verify_ltxvideo_pyramid_patch():
         "✅ LTXVideo pyramid compatibility patch verified."
     )
 
+def verify_ltxvideo_import():
+    """
+    Import the actual patched ComfyUI-LTXVideo package
+    before ComfyUI starts.
+    """
+
+    import importlib.util
+
+    package_dir = (
+        COMFY
+        / "custom_nodes"
+        / "ComfyUI-LTXVideo"
+    )
+
+    init_file = (
+        package_dir
+        / "__init__.py"
+    )
+
+    if not init_file.exists():
+        raise RuntimeError(
+            "ComfyUI-LTXVideo __init__.py not found:\n"
+            f"{init_file}"
+        )
+
+    spec = importlib.util.spec_from_file_location(
+        "LTXVideoPreflight",
+        str(init_file),
+        submodule_search_locations=[
+            str(package_dir)
+        ],
+    )
+
+    if (
+        spec is None
+        or spec.loader is None
+    ):
+        raise RuntimeError(
+            "Could not create an import spec for "
+            "ComfyUI-LTXVideo."
+        )
+
+    module = (
+        importlib.util.module_from_spec(
+            spec
+        )
+    )
+
+    try:
+        spec.loader.exec_module(
+            module
+        )
+
+    except Exception as error:
+        raise RuntimeError(
+            "Patched ComfyUI-LTXVideo failed "
+            "the preflight import:\n"
+            f"{error}"
+        ) from error
+
+    print(
+        "✅ ComfyUI-LTXVideo import verified."
+    )
+
 def main():
 
     print(
@@ -1283,6 +1347,8 @@ def main():
     )
 
     verify_ltxvideo_pyramid_patch()
+
+    verify_ltxvideo_import()
 
     # ---------------------------------------------------------
     # Link all required model assets.
