@@ -26,10 +26,7 @@ COMFYUI_DIR = (
 # COMFYUI WORKER
 # ============================================================================
 
-HOST = os.getenv(
-    "COMFYUI_HOST",
-    "127.0.0.1",
-)
+HOST = "127.0.0.1"
 
 GPU_ID_TEXT = os.getenv(
     "COMFYUI_GPU_ID",
@@ -64,8 +61,8 @@ if GPU_ID < 0:
 # GPU 1 -> 8189
 # GPU 2 -> 8190
 #
-# launch.py starts one worker per GPU.
-# This file is responsible for one worker only.
+# The port is derived from the GPU ID.
+# There is no environment-variable override.
 # ============================================================================
 
 CANONICAL_COMFYUI_PORT = 8188
@@ -117,6 +114,83 @@ def port_ready() -> bool:
     except OSError:
 
         return False
+
+
+# ============================================================================
+# SAFE STALE PID CLEANUP
+# ============================================================================
+
+def cleanup_stale_pid_file() -> None:
+
+    if not PID_FILE.is_file():
+
+        return
+
+    try:
+
+        pid_text = PID_FILE.read_text(
+            encoding="utf-8"
+        ).strip()
+
+        pid = int(
+            pid_text
+        )
+
+    except (
+        OSError,
+        ValueError,
+    ):
+
+        PID_FILE.unlink(
+            missing_ok=True
+        )
+
+        return
+
+    if pid <= 0:
+
+        PID_FILE.unlink(
+            missing_ok=True
+        )
+
+        return
+
+    try:
+
+        os.kill(
+            pid,
+            0,
+        )
+
+    except ProcessLookupError:
+
+        PID_FILE.unlink(
+            missing_ok=True
+        )
+
+        print(
+            f"Removed stale PID file: "
+            f"{PID_FILE}"
+        )
+
+    except PermissionError:
+
+        raise RuntimeError(
+            "Cannot verify process referenced by PID file:\n"
+            f"{PID_FILE}\n"
+            f"PID: {pid}"
+        )
+
+    except OSError:
+
+        PID_FILE.unlink(
+            missing_ok=True
+        )
+
+        print(
+            f"Removed stale PID file: "
+            f"{PID_FILE}"
+        )
 
 
 # ============================================================================
@@ -189,6 +263,13 @@ def main():
             "ComfyUI main.py was not found:\n"
             f"{main_py}"
         )
+
+    # ------------------------------------------------------------------------
+    # Remove only a genuinely stale PID file.
+    # Never kill a process just because its PID appears in the file.
+    # ------------------------------------------------------------------------
+
+    cleanup_stale_pid_file()
 
     # ------------------------------------------------------------------------
     # Do not start another worker if this worker's endpoint is already alive.
