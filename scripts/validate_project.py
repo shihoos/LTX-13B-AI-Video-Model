@@ -145,11 +145,6 @@ START_COMFYUI = (
     / "start_comfyui.py"
 )
 
-START_COMFYUI_TUNNEL = (
-    KAGGLE_DIR
-    / "start_comfyui_tunnel.py"
-)
-
 LIVE_RUNTIME = (
     KAGGLE_DIR
     / "verify_live_runtime.py"
@@ -267,7 +262,6 @@ REQUIRED_FILES = (
     "kaggle/launch.py",
     "kaggle/preflight_modern.py",
     "kaggle/start_comfyui.py",
-    "kaggle/start_comfyui_tunnel.py",
     "kaggle/verify_live_runtime.py",
 
     # Compatibility
@@ -1560,18 +1554,6 @@ def validate_port_contract() -> None:
     # Tunnel
     # ------------------------------------------------------------------------
 
-    tunnel = read_text(
-        START_COMFYUI_TUNNEL
-    )
-
-    require(
-        str(
-            STALE_COMFYUI_PORT
-        )
-        not in tunnel,
-        "Stale ComfyUI port detected "
-        "in start_comfyui_tunnel.py.",
-    )
 
     require(
         str(
