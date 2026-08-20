@@ -48,15 +48,22 @@ python_runtime:
 
   # These are provided by the Kaggle GPU image
   # and are verified, not forcibly reinstalled.
-  torch: 2.10.0+cu128
-  torchvision: 0.25.0+cu128
+  python_runtime:
+  # CUDA 13.0 tested successfully with the full
+  # ComfyUI + LTX stack on 2 × Tesla T4.
+  torch: 2.12.1+cu130
+  torchvision: 0.27.1+cu130
+  torchaudio: 2.11.0+cu130
 
-  # These are installed/verified by bootstrap.
+  torch_index:
+    url: https://download.pytorch.org/whl/cu130
+
   torchsde: 0.2.6
   spandrel: 0.4.2
   av: 18.1.0
   gguf: 0.19.0
 
+  
 
 custom_nodes:
 
