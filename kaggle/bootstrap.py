@@ -1205,9 +1205,17 @@ def verify_ltxvideo_import():
     """
     Import the actual patched ComfyUI-LTXVideo package
     before ComfyUI starts.
+
+    The package contains relative imports, so it is
+    registered in sys.modules before exec_module().
+
+    The actual ComfyUI root is also added to sys.path so
+    imports are resolved the same way they are during
+    normal ComfyUI startup.
     """
 
     import importlib.util
+    import sys
 
     package_dir = (
         COMFY
@@ -1220,18 +1228,61 @@ def verify_ltxvideo_import():
         / "__init__.py"
     )
 
+    # ---------------------------------------------------------
+    # Basic package validation
+    # ---------------------------------------------------------
+
+    if not package_dir.exists():
+        raise RuntimeError(
+            "ComfyUI-LTXVideo directory not found:\n"
+            f"{package_dir}"
+        )
+
+    if not (
+        package_dir
+        / ".git"
+    ).exists():
+        raise RuntimeError(
+            "ComfyUI-LTXVideo is not a Git checkout:\n"
+            f"{package_dir}"
+        )
+
     if not init_file.exists():
         raise RuntimeError(
-            "ComfyUI-LTXVideo __init__.py not found:\n"
+            "ComfyUI-LTXVideo __init__.py "
+            "not found:\n"
             f"{init_file}"
         )
 
-    spec = importlib.util.spec_from_file_location(
-        "LTXVideoPreflight",
-        str(init_file),
-        submodule_search_locations=[
-            str(package_dir)
-        ],
+    # ---------------------------------------------------------
+    # Make the real ComfyUI installation importable
+    # ---------------------------------------------------------
+
+    comfy_root = str(COMFY)
+
+    if comfy_root not in sys.path:
+        sys.path.insert(
+            0,
+            comfy_root,
+        )
+
+    # ---------------------------------------------------------
+    # Create package import specification
+    # ---------------------------------------------------------
+
+    package_name = (
+        "LTXVideoPreflight"
+    )
+
+    spec = (
+        importlib.util
+        .spec_from_file_location(
+            package_name,
+            str(init_file),
+            submodule_search_locations=[
+                str(package_dir)
+            ],
+        )
     )
 
     if (
@@ -1239,30 +1290,54 @@ def verify_ltxvideo_import():
         or spec.loader is None
     ):
         raise RuntimeError(
-            "Could not create an import spec for "
-            "ComfyUI-LTXVideo."
+            "Could not create an import "
+            "spec for ComfyUI-LTXVideo."
         )
 
     module = (
-        importlib.util.module_from_spec(
+        importlib.util
+        .module_from_spec(
             spec
         )
     )
 
+    # ---------------------------------------------------------
+    # Register package BEFORE executing __init__.py
+    #
+    # This is required for imports such as:
+    #     from .audio_only import ...
+    # ---------------------------------------------------------
+
+    sys.modules[
+        package_name
+    ] = module
+
     try:
+
         spec.loader.exec_module(
             module
         )
 
     except Exception as error:
+
         raise RuntimeError(
-            "Patched ComfyUI-LTXVideo failed "
-            "the preflight import:\n"
+            "Patched ComfyUI-LTXVideo "
+            "failed the preflight import:\n"
             f"{error}"
         ) from error
 
+    finally:
+
+        # Remove only our temporary top-level
+        # preflight package registration.
+        sys.modules.pop(
+            package_name,
+            None
+        )
+
     print(
-        "✅ ComfyUI-LTXVideo import verified."
+        "✅ ComfyUI-LTXVideo "
+        "import verified."
     )
 
 def main():
