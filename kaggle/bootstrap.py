@@ -608,6 +608,12 @@ def verify_runtime(
         ]
     )
 
+    expected_torchaudio = (
+    runtime[
+        "torchaudio"
+        ]
+    )
+
     print(
         "=" * 80
     )
