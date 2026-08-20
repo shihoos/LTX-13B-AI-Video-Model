@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -367,7 +368,208 @@ def blur_internal(image, blur_radius):
         patched,
         encoding="utf-8",
     )
+def patch_modern_pyramid_blending(
+    pyramid_file: Path,
+) -> None:
+    """
+    Apply the Kornia >= 0.8.3 compatibility fix to the
+    pinned ComfyUI-LTXVideo checkout.
 
+    The upstream file currently imports `pad` from:
+        kornia.geometry.transform.pyramid
+
+    Modern Kornia no longer exports that symbol there.
+    PyTorch's F.pad is the equivalent operation.
+
+    This patch is intentionally strict:
+    if the expected source shape changes, fail instead
+    of silently modifying the wrong code.
+    """
+
+    if not pyramid_file.exists():
+        raise FileNotFoundError(
+            "Modern LTXVideo pyramid_blending.py not found:\n"
+            f"{pyramid_file}"
+        )
+
+    text = pyramid_file.read_text(
+        encoding="utf-8"
+    )
+
+    # --------------------------------------------------------
+    # Already patched: verify and return.
+    # --------------------------------------------------------
+
+    if "pad = F.pad" in text:
+        if re.search(
+            r"from\s+kornia\.geometry\.transform\.pyramid\s+import\s*\("
+            r"(?P<body>.*?)\)",
+            text,
+            flags=re.DOTALL,
+        ):
+            match = re.search(
+                r"from\s+kornia\.geometry\.transform\.pyramid\s+import\s*\("
+                r"(?P<body>.*?)\)",
+                text,
+                flags=re.DOTALL,
+            )
+
+            if match and re.search(
+                r"^\s*pad\s*,?\s*$",
+                match.group("body"),
+                flags=re.MULTILINE,
+            ):
+                raise RuntimeError(
+                    "pyramid_blending.py contains both "
+                    "pad = F.pad and the old Kornia pad import."
+                )
+
+        print(
+            "✅ Modern LTXVideo pyramid_blending.py "
+            "already patched."
+        )
+        return
+
+    # --------------------------------------------------------
+    # F.pad must already exist in this exact source.
+    # The pinned ac4d998 file already imports it.
+    # --------------------------------------------------------
+
+    if (
+        "import torch.nn.functional as F"
+        not in text
+    ):
+        raise RuntimeError(
+            "Expected `import torch.nn.functional as F` "
+            "was not found in pyramid_blending.py."
+        )
+
+    # --------------------------------------------------------
+    # Find the exact Kornia pyramid import block.
+    # --------------------------------------------------------
+
+    pattern = re.compile(
+        r"from\s+kornia\.geometry\.transform\.pyramid\s+import\s*\("
+        r"(?P<body>.*?)"
+        r"\)",
+        flags=re.DOTALL,
+    )
+
+    match = pattern.search(text)
+
+    if not match:
+        raise RuntimeError(
+            "Expected Kornia pyramid import block "
+            "was not found."
+        )
+
+    body = match.group("body")
+
+    # --------------------------------------------------------
+    # Require the exact obsolete symbol.
+    # --------------------------------------------------------
+
+    if not re.search(
+        r"^\s*pad\s*,?\s*$",
+        body,
+        flags=re.MULTILINE,
+    ):
+        raise RuntimeError(
+            "Expected obsolete Kornia `pad` import "
+            "was not found."
+        )
+
+    # --------------------------------------------------------
+    # Remove ONLY `pad` from that import block.
+    # --------------------------------------------------------
+
+    new_body = re.sub(
+        r"^\s*pad\s*,?\s*$\n?",
+        "",
+        body,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+    new_import = (
+        "from kornia.geometry.transform.pyramid import ("
+        + new_body
+        + ")"
+    )
+
+    text = (
+        text[:match.start()]
+        + new_import
+        + text[match.end():]
+    )
+
+    # --------------------------------------------------------
+    # Define pad from PyTorch immediately after the F import.
+    # --------------------------------------------------------
+
+    marker = (
+        "import torch.nn.functional as F\n"
+    )
+
+    replacement = (
+        "import torch.nn.functional as F\n"
+        "\n"
+        "# Kornia >= 0.8.3 compatibility:\n"
+        "# `pad` is no longer re-exported by Kornia.\n"
+        "pad = F.pad\n"
+    )
+
+    if text.count(marker) != 1:
+        raise RuntimeError(
+            "Could not locate a unique "
+            "`torch.nn.functional as F` import."
+        )
+
+    text = text.replace(
+        marker,
+        replacement,
+        1,
+    )
+
+    # --------------------------------------------------------
+    # Final source-level verification.
+    # --------------------------------------------------------
+
+    if "pad = F.pad" not in text:
+        raise RuntimeError(
+            "Failed to add `pad = F.pad`."
+        )
+
+    remaining = re.search(
+        r"from\s+kornia\.geometry\.transform\.pyramid\s+import\s*\("
+        r"(?P<body>.*?)\)",
+        text,
+        flags=re.DOTALL,
+    )
+
+    if (
+        remaining
+        and re.search(
+            r"^\s*pad\s*,?\s*$",
+            remaining.group("body"),
+            flags=re.MULTILINE,
+        )
+    ):
+        raise RuntimeError(
+            "Old Kornia `pad` import still remains."
+        )
+
+    pyramid_file.write_text(
+        text,
+        encoding="utf-8",
+    )
+
+    print(
+        "✅ Applied modern Kornia compatibility patch:"
+    )
+    print(
+        f"   {pyramid_file}"
+    )
 
 def write_curated_init(
     target: Path,
