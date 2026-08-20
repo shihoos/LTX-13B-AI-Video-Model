@@ -13,6 +13,8 @@ QWEN_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
 # Permanent Kaggle dataset mount.
 QWEN_KAGGLE_PATH = (
     Path("/kaggle/input")
+    / "datasets"
+    / "shihoos"
     / "qwen3-4b-instruct-2507"
 )
 
