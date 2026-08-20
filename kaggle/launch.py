@@ -10,16 +10,16 @@ PROJECT = Path(
     "/kaggle/working/LTX-13B-AI-Video-Model"
 )
 
-PREFLIGHT = (
-    PROJECT
-    / "kaggle"
-    / "preflight_modern.py"
-)
-
 BOOTSTRAP = (
     PROJECT
     / "kaggle"
     / "bootstrap.py"
+)
+
+PREFLIGHT = (
+    PROJECT
+    / "kaggle"
+    / "preflight_modern.py"
 )
 
 START_COMFYUI = (
@@ -162,7 +162,7 @@ def main():
     )
 
     run_checked(
-        PREFLIGHT
+        BOOTSTRAP
     )
 
     print()
@@ -172,7 +172,7 @@ def main():
     )
 
     run_checked(
-        BOOTSTRAP
+        PREFLIGHT
     )
 
     print()
