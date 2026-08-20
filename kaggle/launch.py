@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +28,14 @@ START_COMFYUI = (
     / "start_comfyui.py"
 )
 
+COMFYUI_HOST = (
+    "127.0.0.1"
+)
+
+PRIMARY_COMFYUI_PORT = (
+    8188
+)
+
 
 def run_checked(
     script: Path,
@@ -42,6 +51,99 @@ def run_checked(
     )
 
 
+def get_gpu_count() -> int:
+
+    try:
+
+        import torch
+
+    except ImportError as error:
+
+        raise RuntimeError(
+            "PyTorch is not available after "
+            "runtime bootstrap."
+        ) from error
+
+    if not torch.cuda.is_available():
+
+        raise RuntimeError(
+            "CUDA is not available. "
+            "Kaggle GPU must be enabled."
+        )
+
+    gpu_count = (
+        torch.cuda.device_count()
+    )
+
+    if gpu_count < 1:
+
+        raise RuntimeError(
+            "No CUDA GPUs were detected."
+        )
+
+    return gpu_count
+
+
+def start_comfyui_worker(
+    gpu_id: int,
+) -> None:
+
+    port = (
+        PRIMARY_COMFYUI_PORT
+        + gpu_id
+    )
+
+    environment = os.environ.copy()
+
+    environment[
+        "COMFYUI_HOST"
+    ] = COMFYUI_HOST
+
+    environment[
+        "COMFYUI_PORT"
+    ] = str(port)
+
+    environment[
+        "COMFYUI_GPU_ID"
+    ] = str(gpu_id)
+
+    print()
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"STARTING COMFYUI WORKER "
+        f"GPU {gpu_id}"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        f"GPU:  {gpu_id}"
+    )
+
+    print(
+        f"Host: {COMFYUI_HOST}"
+    )
+
+    print(
+        f"Port: {port}"
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(START_COMFYUI),
+        ],
+        cwd=PROJECT,
+        env=environment,
+        check=True,
+    )
+
+
 def main():
 
     print(
@@ -49,7 +151,7 @@ def main():
     )
 
     print(
-        "LTX-13B MODERN ONE-CELL STARTUP"
+        "LTX-13B MODERN MULTI-GPU STARTUP"
     )
 
     print(
@@ -57,6 +159,7 @@ def main():
     )
 
     print()
+
     print(
         "STEP 1 — REPOSITORY / GPU PREFLIGHT"
     )
@@ -66,6 +169,7 @@ def main():
     )
 
     print()
+
     print(
         "STEP 2 — EXACT RUNTIME BOOTSTRAP"
     )
@@ -75,15 +179,35 @@ def main():
     )
 
     print()
+
     print(
-        "STEP 3 — START LOCAL COMFYUI BACKEND"
+        "STEP 3 — DETECT CUDA GPUs"
     )
 
-    run_checked(
-        START_COMFYUI
+    gpu_count = (
+        get_gpu_count()
+    )
+
+    print(
+        f"Detected {gpu_count} CUDA GPU(s)."
     )
 
     print()
+
+    print(
+        "STEP 4 — START COMFYUI WORKERS"
+    )
+
+    for gpu_id in range(
+        gpu_count
+    ):
+
+        start_comfyui_worker(
+            gpu_id
+        )
+
+    print()
+
     print(
         "=" * 80
     )
@@ -96,16 +220,28 @@ def main():
         "=" * 80
     )
 
-    print(
-        "ComfyUI API: http://127.0.0.1:8188"
-    )
+    print()
+
+    for gpu_id in range(
+        gpu_count
+    ):
+
+        port = (
+            PRIMARY_COMFYUI_PORT
+            + gpu_id
+        )
+
+        print(
+            f"GPU {gpu_id}: "
+            f"http://{COMFYUI_HOST}:{port}"
+        )
+
+    print()
+
 
     print(
-        "Browser: not required"
-    )
-
-    print(
-        "ComfyUI continues running in the background."
+        "All ComfyUI workers continue "
+        "running in the background."
     )
 
     print(
