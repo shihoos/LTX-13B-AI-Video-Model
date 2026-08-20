@@ -28,6 +28,12 @@ Canonical local ComfyUI port:
 
     8188
 
+Multi-GPU local port strategy:
+
+    GPU 0 -> 8188
+    GPU 1 -> 8189
+    GPU N -> 8188 + N
+
 Known stale local ComfyUI port:
 
     8219
@@ -42,9 +48,10 @@ because it exists.
 
 Instead it verifies that:
 
-    8188 = canonical local endpoint
+    8188 = canonical base local endpoint
+    base_port_plus_gpu_id = multi-GPU port strategy
 
-and that 8219 is used only by the explicit stale-endpoint guard.
+and that 8219 is registered as a known stale port.
 
 This keeps the CPU preflight synchronized with the production
 application contract.
@@ -168,6 +175,14 @@ START_COMFYUI = (
 CANONICAL_COMFYUI_PORT = 8188
 
 STALE_COMFYUI_PORT = 8219
+
+COMFYUI_HOST = "127.0.0.1"
+
+COMFYUI_PROTOCOL = "http"
+
+COMFYUI_PORT_STRATEGY = (
+    "base_port_plus_gpu_id"
+)
 
 LEGACY_LATENT_LOADER = (
     "LTXVLatentUpsamplerModelLoader"
@@ -542,6 +557,7 @@ def check_lock(
         "detailer_compat",
         "models",
         "validation",
+        "runtime",
     }
 
     missing = (
@@ -686,7 +702,102 @@ def check_lock(
 
 
 # ============================================================================
-# 4. WORKFLOWS
+# 4. RUNTIME / NETWORK CONTRACT
+# ============================================================================
+
+def check_runtime_network_contract(
+    lock: dict,
+) -> None:
+
+    runtime = lock.get(
+        "runtime"
+    )
+
+    require(
+        isinstance(
+            runtime,
+            dict,
+        ),
+        "compatibility_lock.yaml "
+        "missing runtime section.",
+    )
+
+    network = runtime.get(
+        "network"
+    )
+
+    require(
+        isinstance(
+            network,
+            dict,
+        ),
+        "compatibility_lock.yaml "
+        "missing runtime.network section.",
+    )
+
+    require(
+        network.get(
+            "host"
+        )
+        == COMFYUI_HOST,
+        "runtime.network.host must be "
+        "127.0.0.1.",
+    )
+
+    require(
+        network.get(
+            "base_port"
+        )
+        == CANONICAL_COMFYUI_PORT,
+        "runtime.network.base_port must "
+        "be 8188.",
+    )
+
+    require(
+        network.get(
+            "port_strategy"
+        )
+        == COMFYUI_PORT_STRATEGY,
+        "runtime.network.port_strategy "
+        "must be base_port_plus_gpu_id.",
+    )
+
+    require(
+        network.get(
+            "protocol"
+        )
+        == COMFYUI_PROTOCOL,
+        "runtime.network.protocol "
+        "must be http.",
+    )
+
+    stale_ports = network.get(
+        "stale_ports"
+    )
+
+    require(
+        isinstance(
+            stale_ports,
+            list,
+        ),
+        "runtime.network.stale_ports "
+        "must be a list.",
+    )
+
+    require(
+        STALE_COMFYUI_PORT
+        in stale_ports,
+        "runtime.network.stale_ports "
+        "must contain 8219.",
+    )
+
+    print(
+        "OK   runtime/network contract"
+    )
+
+
+# ============================================================================
+# 5. WORKFLOWS
 # ============================================================================
 
 def check_workflows() -> None:
@@ -794,7 +905,7 @@ def check_workflows() -> None:
 
 
 # ============================================================================
-# 5. WORKFLOW ADAPTER
+# 6. WORKFLOW ADAPTER
 # ============================================================================
 
 def check_adapter() -> None:
@@ -945,7 +1056,7 @@ def check_real_conversion() -> None:
 
 
 # ============================================================================
-# 6. COMPATIBILITY BUILDER
+# 7. COMPATIBILITY BUILDER
 # ============================================================================
 
 def check_compatibility_builder() -> None:
@@ -979,7 +1090,7 @@ def check_compatibility_builder() -> None:
 
 
 # ============================================================================
-# 7. PRODUCTION APPLICATION WIRING
+# 8. PRODUCTION APPLICATION WIRING
 # ============================================================================
 
 def check_generate_video() -> None:
@@ -1113,7 +1224,7 @@ def check_generate_video() -> None:
 
 
 # ============================================================================
-# 8. KAGGLE STARTUP WIRING
+# 9. KAGGLE STARTUP WIRING
 # ============================================================================
 
 def check_kaggle_wiring() -> None:
@@ -1218,7 +1329,7 @@ def check_kaggle_wiring() -> None:
 
 
 # ============================================================================
-# 9. LIVE RUNTIME VERIFIER CONTRACT
+# 10. LIVE RUNTIME VERIFIER CONTRACT
 # ============================================================================
 
 def check_live_runtime_contract() -> None:
@@ -1310,7 +1421,7 @@ def check_live_runtime_contract() -> None:
 
 
 # ============================================================================
-# 10. CPU PREFLIGHT SELF-CONTRACT
+# 11. CPU PREFLIGHT SELF-CONTRACT
 # ============================================================================
 
 def check_self_contract() -> None:
@@ -1354,7 +1465,7 @@ def check_self_contract() -> None:
 
 
 # ============================================================================
-# 11. PORT CONTRACT
+# 12. PORT CONTRACT
 # ============================================================================
 
 def check_port_contract() -> None:
@@ -1484,7 +1595,7 @@ def check_port_contract() -> None:
 
 
 # ============================================================================
-# 12. VALIDATOR ALIGNMENT
+# 13. VALIDATOR ALIGNMENT
 # ============================================================================
 
 def check_validator_alignment() -> None:
@@ -1498,6 +1609,9 @@ def check_validator_alignment() -> None:
         "compatibility_lock.yaml",
         "LatentUpscaleModelLoader",
         "LTXVLatentUpsamplerModelLoader",
+        "runtime",
+        "runtime.network",
+        "base_port_plus_gpu_id",
         "8188",
         "8219",
     }
@@ -1553,6 +1667,10 @@ def main() -> None:
     lock = load_lock()
 
     check_lock(
+        lock
+    )
+
+    check_runtime_network_contract(
         lock
     )
 
@@ -1612,6 +1730,16 @@ def main() -> None:
 
     print(
         "  8188"
+    )
+
+    print()
+
+    print(
+        "Multi-GPU port strategy:"
+    )
+
+    print(
+        "  GPU N -> 8188 + N"
     )
 
     print()
