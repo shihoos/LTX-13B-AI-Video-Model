@@ -114,7 +114,7 @@ def verify_gpu(
         "torch"
     ]
 
-        expected_cuda = None
+    expected_cuda = None
 
     if "+cu" in expected_torch:
         cuda_tag = expected_torch.split(
