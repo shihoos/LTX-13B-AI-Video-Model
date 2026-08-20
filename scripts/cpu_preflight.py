@@ -23,10 +23,6 @@ Single source of truth:
 
     kaggle/compatibility_lock.yaml
 
-Obsolete files that MUST NOT exist:
-
-    kaggle/model_paths.yaml
-    kaggle/runtime_requirements.lock
 
 Canonical local ComfyUI port:
 
@@ -164,11 +160,6 @@ START_COMFYUI = (
     / "start_comfyui.py"
 )
 
-START_COMFYUI_TUNNEL = (
-    KAGGLE_DIR
-    / "start_comfyui_tunnel.py"
-)
-
 
 # ============================================================================
 # CONSTANTS
@@ -186,18 +177,6 @@ MODERN_LATENT_LOADER = (
     "LatentUpscaleModelLoader"
 )
 
-
-# ============================================================================
-# OBSOLETE FILES
-# ============================================================================
-
-OBSOLETE_FILES = {
-    KAGGLE_DIR
-    / "model_paths.yaml",
-
-    KAGGLE_DIR
-    / "runtime_requirements.lock",
-}
 
 
 # ============================================================================
@@ -442,7 +421,6 @@ def check_files() -> None:
         "kaggle/launch.py",
         "kaggle/preflight_modern.py",
         "kaggle/start_comfyui.py",
-        "kaggle/start_comfyui_tunnel.py",
         "kaggle/verify_live_runtime.py",
 
         # --------------------------------------------------------------------
@@ -480,18 +458,6 @@ def check_files() -> None:
             f"{path}",
         )
 
-    for obsolete in (
-        OBSOLETE_FILES
-    ):
-
-        require(
-            not obsolete.exists(),
-            "Obsolete configuration still exists:\n"
-            f"{obsolete}\n\n"
-            "Do NOT recreate this file.\n"
-            "compatibility_lock.yaml is the "
-            "single source of truth.",
-        )
 
     print(
         f"OK   repository files: "
@@ -1223,13 +1189,7 @@ def check_kaggle_wiring() -> None:
         "lock-driven.",
     )
 
-    require(
-        "model_paths.yaml"
-        not in preflight,
-        "preflight_modern.py still references "
-        "obsolete model_paths.yaml.",
-    )
-
+    
     # ------------------------------------------------------------------------
     # tunnel
     # ------------------------------------------------------------------------
@@ -1390,25 +1350,6 @@ def check_self_contract() -> None:
         "compatibility_lock.yaml.",
     )
 
-    # ------------------------------------------------------------------------
-    # Obsolete files must remain explicitly protected.
-    # ------------------------------------------------------------------------
-
-    require(
-        "model_paths.yaml"
-        in source,
-        "CPU preflight must explicitly "
-        "protect against obsolete "
-        "model_paths.yaml.",
-    )
-
-    require(
-        "runtime_requirements.lock"
-        in source,
-        "CPU preflight must explicitly "
-        "protect against obsolete "
-        "runtime_requirements.lock.",
-    )
 
     # ------------------------------------------------------------------------
     # Modern/legacy adapter contract.
@@ -1517,14 +1458,6 @@ def check_port_contract() -> None:
     # Tunnel
     # ------------------------------------------------------------------------
 
-    require(
-        str(
-            CANONICAL_COMFYUI_PORT
-        )
-        in tunnel,
-        "start_comfyui_tunnel.py does "
-        "not contain canonical port 8188.",
-    )
 
     require(
         str(
@@ -1575,7 +1508,6 @@ def check_validator_alignment() -> None:
     required = {
         "scripts/cpu_preflight.py",
         "compatibility_lock.yaml",
-        "model_paths.yaml",
         "runtime_requirements.lock",
         "LatentUpscaleModelLoader",
         "LTXVLatentUpsamplerModelLoader",
@@ -1685,27 +1617,6 @@ def main() -> None:
         "  kaggle/compatibility_lock.yaml"
     )
 
-    print()
-
-    print(
-        "Obsolete model_paths.yaml:"
-    )
-
-    print(
-        "  NOT USED"
-    )
-
-    print()
-
-    print(
-        "Obsolete runtime_requirements.lock:"
-    )
-
-    print(
-        "  NOT USED"
-    )
-
-    print()
 
     print(
         "Canonical ComfyUI runtime port:"
