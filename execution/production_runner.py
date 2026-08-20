@@ -53,6 +53,16 @@ class ProductionRunner:
         final shot MP4
               ↓
         FFmpeg assembly
+
+    The runner is responsible for:
+
+    - validating the production plan
+    - resuming valid completed shots
+    - rejecting invalid/incomplete checkpoint artifacts
+    - scheduling pending shots across GPU workers
+    - validating completed shot artifacts
+    - assembling the final video
+    - validating the final assembled artifact
     """
 
     def __init__(
@@ -68,13 +78,15 @@ class ProductionRunner:
         )
 
         if not gpu_urls:
+
             raise ValueError(
                 "At least one ComfyUI GPU URL is required."
             )
 
         self.gpu_urls = {
             int(gpu_id): str(url).rstrip("/")
-            for gpu_id, url in gpu_urls.items()
+            for gpu_id, url
+            in gpu_urls.items()
         }
 
         self.production_dir = (
@@ -158,6 +170,55 @@ class ProductionRunner:
         )
 
     # ========================================================
+    # ARTIFACT VALIDATION
+    # ========================================================
+
+    @staticmethod
+    def _validate_artifact(
+        path: str | Path,
+        description: str,
+    ) -> Path:
+
+        artifact = Path(
+            path
+        )
+
+        if not artifact.exists():
+
+            raise RuntimeError(
+                f"{description} does not exist:\n"
+                f"{artifact}"
+            )
+
+        if not artifact.is_file():
+
+            raise RuntimeError(
+                f"{description} is not a file:\n"
+                f"{artifact}"
+            )
+
+        try:
+
+            size = artifact.stat().st_size
+
+        except OSError as error:
+
+            raise RuntimeError(
+                f"Could not inspect {description}:\n"
+                f"{artifact}\n"
+                f"{error}"
+            ) from error
+
+        if size <= 0:
+
+            raise RuntimeError(
+                f"{description} is empty:\n"
+                f"{artifact}"
+            )
+
+        return artifact
+
+    # ========================================================
     # PREPARE
     # ========================================================
 
@@ -170,6 +231,7 @@ class ProductionRunner:
             production_plan,
             dict,
         ):
+
             raise TypeError(
                 "production_plan must be a dict."
             )
@@ -182,11 +244,13 @@ class ProductionRunner:
             shots,
             list,
         ):
+
             raise ValueError(
                 "production_plan['shots'] must be a list."
             )
 
         if not shots:
+
             raise ValueError(
                 "Production plan contains no shots."
             )
@@ -197,6 +261,7 @@ class ProductionRunner:
                 shot,
                 dict,
             ):
+
                 raise ValueError(
                     "Every production-plan shot must be a dict."
                 )
@@ -262,19 +327,37 @@ class ProductionRunner:
                 and state.get(
                     "upscaled_path"
                 )
-                and Path(
-                    state[
-                        "upscaled_path"
-                    ]
-                ).exists()
             ):
 
-                print(
-                    f"{shot_id}: "
-                    "already complete."
-                )
+                try:
 
-                continue
+                    self._validate_artifact(
+                        state[
+                            "upscaled_path"
+                        ],
+                        f"Completed artifact for {shot_id}",
+                    )
+
+                except RuntimeError as error:
+
+                    print(
+                        f"{shot_id}: "
+                        "checkpoint artifact is invalid; "
+                        "shot will be regenerated."
+                    )
+
+                    print(
+                        f"  Reason: {error}"
+                    )
+
+                else:
+
+                    print(
+                        f"{shot_id}: "
+                        "already complete."
+                    )
+
+                    continue
 
             pending_shots.append(
                 self._dict_to_shot(
@@ -337,29 +420,39 @@ class ProductionRunner:
                     f"for {shot_id}."
                 )
 
-            final_path = (
-                state.get(
-                    "upscaled_path"
-                )
-            )
-
-            if (
-                state.get(
-                    "status"
-                ) != "completed"
-                or not final_path
-                or not Path(
-                    final_path
-                ).exists()
-            ):
+            if state.get(
+                "status"
+            ) != "completed":
 
                 raise RuntimeError(
                     "Shot did not reach final "
                     f"completed state: {shot_id}"
                 )
 
+            final_path = (
+                state.get(
+                    "upscaled_path"
+                )
+            )
+
+            if not final_path:
+
+                raise RuntimeError(
+                    "Completed shot is missing "
+                    f"upscaled_path: {shot_id}"
+                )
+
+            validated_path = (
+                self._validate_artifact(
+                    final_path,
+                    f"Completed shot artifact for {shot_id}",
+                )
+            )
+
             completed.append(
-                final_path
+                str(
+                    validated_path
+                )
             )
 
         existing = (
@@ -375,19 +468,36 @@ class ProductionRunner:
             and existing.get(
                 "path"
             )
-            and Path(
-                existing["path"]
-            ).exists()
         ):
 
-            print(
-                "Final video already exists. "
-                "Skipping assembly."
-            )
+            try:
 
-            return Path(
-                existing["path"]
-            )
+                existing_path = (
+                    self._validate_artifact(
+                        existing["path"],
+                        "Existing final video",
+                    )
+                )
+
+            except RuntimeError as error:
+
+                print(
+                    "Existing assembly checkpoint "
+                    "is invalid; rebuilding final video."
+                )
+
+                print(
+                    f"  Reason: {error}"
+                )
+
+            else:
+
+                print(
+                    "Final video already exists. "
+                    "Skipping assembly."
+                )
+
+                return existing_path
 
         self.checkpoints.set_assembly_started()
 
@@ -400,18 +510,16 @@ class ProductionRunner:
                 )
             )
 
-            if not Path(
-                final_path
-            ).exists():
-
-                raise RuntimeError(
-                    "Assembly completed without "
-                    "creating the final video."
+            validated_final_path = (
+                self._validate_artifact(
+                    final_path,
+                    "Final assembled video",
                 )
+            )
 
             self.checkpoints.set_assembly_complete(
                 str(
-                    final_path
+                    validated_final_path
                 )
             )
 
@@ -420,12 +528,10 @@ class ProductionRunner:
             )
 
             print(
-                final_path
+                validated_final_path
             )
 
-            return Path(
-                final_path
-            )
+            return validated_final_path
 
         except Exception as error:
 
@@ -613,3 +719,7 @@ class ProductionRunner:
                 [],
             ),
         )
+
+
+if __name__ == "__main__":
+    pass
