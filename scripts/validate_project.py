@@ -22,8 +22,9 @@ This validator checks:
 11. CPU preflight contract
 12. Live-runtime verifier contract
 13. Canonical ComfyUI port contract
-14. Optional live ComfyUI runtime
-15. Optional CUDA availability
+14. Runtime/network contract
+15. Optional live ComfyUI runtime
+16. Optional CUDA availability
 
 Important
 ---------
@@ -47,6 +48,16 @@ Canonical local ComfyUI port:
 Known stale local ComfyUI port:
 
     8219
+
+Multi-GPU port strategy:
+
+    base_port + GPU ID
+
+Therefore:
+
+    GPU 0 -> 8188
+    GPU 1 -> 8189
+    GPU 2 -> 8190
 
 The source DETAILER workflow intentionally contains the legacy:
 
@@ -195,6 +206,14 @@ CANONICAL_COMFYUI_PORT = 8188
 
 STALE_COMFYUI_PORT = 8219
 
+CANONICAL_COMFYUI_HOST = "127.0.0.1"
+
+COMFYUI_PORT_STRATEGY = (
+    "base_port_plus_gpu_id"
+)
+
+COMFYUI_PROTOCOL = "http"
+
 LEGACY_LATENT_LOADER = (
     "LTXVLatentUpsamplerModelLoader"
 )
@@ -275,7 +294,10 @@ REQUIRED_FILES = (
 # ============================================================================
 
 def fail(message: str) -> None:
-    raise RuntimeError(message)
+
+    raise RuntimeError(
+        message
+    )
 
 
 def require(
@@ -284,14 +306,19 @@ def require(
 ) -> None:
 
     if not condition:
-        fail(message)
+
+        fail(
+            message
+        )
 
 
 # ============================================================================
 # FILE HELPERS
 # ============================================================================
 
-def read_text(path: Path) -> str:
+def read_text(
+    path: Path,
+) -> str:
 
     require(
         path.is_file(),
@@ -317,7 +344,9 @@ def parse_python(
     path: Path,
 ) -> ast.Module:
 
-    source = read_text(path)
+    source = read_text(
+        path
+    )
 
     try:
 
@@ -392,11 +421,16 @@ def all_python_files() -> list[Path]:
             part in excluded_parts
             for part in relative.parts
         ):
+
             continue
 
-        result.append(path)
+        result.append(
+            path
+        )
 
-    return sorted(result)
+    return sorted(
+        result
+    )
 
 
 # ============================================================================
@@ -478,6 +512,7 @@ def validate_lock(
         "detailer_compat",
         "models",
         "validation",
+        "runtime",
     }
 
     missing = (
@@ -494,21 +529,31 @@ def validate_lock(
         ),
     )
 
-    comfy = lock["comfyui"]
+    comfy = lock[
+        "comfyui"
+    ]
 
-    models = lock["models"]
+    models = lock[
+        "models"
+    ]
 
     custom_nodes = (
         lock["custom_nodes"]
     )
 
     require(
-        isinstance(comfy, dict),
+        isinstance(
+            comfy,
+            dict,
+        ),
         "lock.comfyui must be a mapping.",
     )
 
     require(
-        isinstance(models, dict),
+        isinstance(
+            models,
+            dict,
+        ),
         "lock.models must be a mapping.",
     )
 
@@ -575,7 +620,10 @@ def validate_lock(
         spec = models[name]
 
         require(
-            isinstance(spec, dict),
+            isinstance(
+                spec,
+                dict,
+            ),
             f"models.{name} "
             "must be a mapping.",
         )
@@ -609,7 +657,10 @@ def validate_lock(
     ]
 
     require(
-        isinstance(runtime, dict),
+        isinstance(
+            runtime,
+            dict,
+        ),
         "lock.python_runtime "
         "must be a mapping.",
     )
@@ -633,8 +684,94 @@ def validate_lock(
             f"{field} is missing.",
         )
 
+    # ------------------------------------------------------------------------
+    # Runtime/network contract
+    # ------------------------------------------------------------------------
+
+    runtime_contract = lock[
+        "runtime"
+    ]
+
+    require(
+        isinstance(
+            runtime_contract,
+            dict,
+        ),
+        "lock.runtime must be a mapping.",
+    )
+
+    network = runtime_contract.get(
+        "network"
+    )
+
+    require(
+        isinstance(
+            network,
+            dict,
+        ),
+        "lock.runtime.network "
+        "must be a mapping.",
+    )
+
+    require(
+        network.get("host")
+        == CANONICAL_COMFYUI_HOST,
+        "lock.runtime.network.host "
+        "must be "
+        f"{CANONICAL_COMFYUI_HOST}.",
+    )
+
+    require(
+        network.get("base_port")
+        == CANONICAL_COMFYUI_PORT,
+        "lock.runtime.network.base_port "
+        "must be "
+        f"{CANONICAL_COMFYUI_PORT}.",
+    )
+
+    require(
+        network.get("port_strategy")
+        == COMFYUI_PORT_STRATEGY,
+        "lock.runtime.network."
+        "port_strategy must be "
+        f"{COMFYUI_PORT_STRATEGY}.",
+    )
+
+    require(
+        network.get("protocol")
+        == COMFYUI_PROTOCOL,
+        "lock.runtime.network.protocol "
+        "must be "
+        f"{COMFYUI_PROTOCOL}.",
+    )
+
+    stale_ports = network.get(
+        "stale_ports"
+    )
+
+    require(
+        isinstance(
+            stale_ports,
+            list,
+        ),
+        "lock.runtime.network."
+        "stale_ports must be a list.",
+    )
+
+    require(
+        STALE_COMFYUI_PORT
+        in stale_ports,
+        "lock.runtime.network."
+        "stale_ports must contain "
+        f"{STALE_COMFYUI_PORT}.",
+    )
+
     print(
         "OK   compatibility lock"
+    )
+
+    print(
+        "OK   runtime/network contract"
     )
 
 
@@ -677,7 +814,9 @@ def validate_python() -> None:
 
     for path in files:
 
-        parse_python(path)
+        parse_python(
+            path
+        )
 
     print(
         "OK   Python AST syntax: "
@@ -1321,11 +1460,11 @@ def validate_live_runtime_verifier() -> None:
     # ------------------------------------------------------------------------
 
     model_checks = {
-        "models[\"ltx_q4\"][\"filename\"]",
-        "models[\"t5_q4\"][\"filename\"]",
-        "models[\"vae\"][\"filename\"]",
-        "models[\"ic_lora\"][\"filename\"]",
-        "models[\"spatial_upscaler\"][\"filename\"]",
+        'models["ltx_q4"]["filename"]',
+        'models["t5_q4"]["filename"]',
+        'models["vae"]["filename"]',
+        'models["ic_lora"]["filename"]',
+        'models["spatial_upscaler"]["filename"]',
     }
 
     for text in (
@@ -1599,7 +1738,10 @@ def get_live_choices(
     )
 
     require(
-        isinstance(node, dict),
+        isinstance(
+            node,
+            dict,
+        ),
         "Live ComfyUI node is missing:\n"
         f"{node_name}",
     )
@@ -2138,6 +2280,16 @@ def main() -> None:
 
     print(
         "  8188"
+    )
+
+    print()
+
+    print(
+        "Multi-GPU port strategy:"
+    )
+
+    print(
+        "  base_port + GPU ID"
     )
 
     print()
