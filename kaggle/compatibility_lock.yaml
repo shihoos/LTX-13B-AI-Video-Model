@@ -2,7 +2,6 @@
 #
 # This file is the SINGLE SOURCE OF TRUTH for:
 # - ComfyUI
-# - frontend package
 # - ComfyUI support packages
 # - custom-node revisions
 # - LTX 0.9.8 compatibility source
