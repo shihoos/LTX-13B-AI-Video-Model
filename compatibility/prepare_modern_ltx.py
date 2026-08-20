@@ -732,7 +732,44 @@ def build_compat_package(
     )
 
     return target
+def patch_active_ltxvideo(
+    project: Path,
+) -> None:
+    """
+    Patch the exact pinned ComfyUI-LTXVideo Git checkout
+    that ComfyUI will import.
+    """
 
+    runtime_package = (
+        project
+        / "ComfyUI"
+        / "custom_nodes"
+        / "ComfyUI-LTXVideo"
+    )
+
+    pyramid_file = (
+        runtime_package
+        / "pyramid_blending.py"
+    )
+
+    if not runtime_package.exists():
+        raise FileNotFoundError(
+            "Active ComfyUI-LTXVideo checkout not found:\n"
+            f"{runtime_package}"
+        )
+
+    if not (
+        runtime_package / ".git"
+    ).exists():
+        raise RuntimeError(
+            "Active ComfyUI-LTXVideo directory is not "
+            "a Git checkout:\n"
+            f"{runtime_package}"
+        )
+
+    patch_modern_pyramid_blending(
+        pyramid_file
+    )
 
 def main():
 
