@@ -1137,6 +1137,69 @@ def verify_git_stack(
             f"✅ {name} {actual}"
         )
 
+def verify_ltxvideo_pyramid_patch():
+
+    runtime = (
+        COMFY
+        / "custom_nodes"
+        / "ComfyUI-LTXVideo"
+    )
+
+    pyramid = (
+        runtime
+        / "pyramid_blending.py"
+    )
+
+    if not runtime.exists():
+        raise RuntimeError(
+            "ComfyUI-LTXVideo runtime directory missing:\n"
+            f"{runtime}"
+        )
+
+    if not (
+        runtime / ".git"
+    ).exists():
+        raise RuntimeError(
+            "ComfyUI-LTXVideo is not a Git checkout:\n"
+            f"{runtime}"
+        )
+
+    text = pyramid.read_text(
+        encoding="utf-8"
+    )
+
+    if "pad = F.pad" not in text:
+        raise RuntimeError(
+            "LTXVideo Kornia compatibility patch "
+            "was not applied."
+        )
+
+    import re
+
+    match = re.search(
+        r"from\s+kornia\.geometry\.transform\.pyramid\s+import\s*\("
+        r"(?P<body>.*?)\)",
+        text,
+        flags=re.DOTALL,
+    )
+
+    if not match:
+        raise RuntimeError(
+            "Could not find the Kornia pyramid import block."
+        )
+
+    if re.search(
+        r"^\s*pad\s*,?\s*$",
+        match.group("body"),
+        flags=re.MULTILINE,
+    ):
+        raise RuntimeError(
+            "Old Kornia `pad` import still exists."
+        )
+
+    print(
+        "✅ LTXVideo pyramid compatibility patch verified."
+    )
 
 def main():
 
