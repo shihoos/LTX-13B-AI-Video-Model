@@ -364,6 +364,83 @@ def install_requirements(
         pass
 
 
+def install_locked_torch(
+    lock,
+):
+    runtime = lock[
+        "python_runtime"
+    ]
+
+    torch_version = runtime[
+        "torch"
+    ]
+
+    torchvision_version = runtime[
+        "torchvision"
+    ]
+
+    torchaudio_version = runtime[
+        "torchaudio"
+    ]
+
+    index_url = runtime[
+        "torch_index"
+    ][
+        "url"
+    ]
+
+    print()
+    print(
+        "=" * 80
+    )
+
+    print(
+        "LOCKED PYTORCH / CUDA INSTALL"
+    )
+
+    print(
+        "=" * 80
+    )
+
+    print(
+        "Torch:",
+        torch_version,
+    )
+
+    print(
+        "Torchvision:",
+        torchvision_version,
+    )
+
+    print(
+        "Torchaudio:",
+        torchaudio_version,
+    )
+
+    print(
+        "Index:",
+        index_url,
+    )
+
+    run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "--index-url",
+            index_url,
+            torch_version,
+            torchvision_version,
+            torchaudio_version,
+        ]
+    )
+
+    print(
+        "✅ Locked PyTorch family installed."
+    )
+
 def install_locked_packages(
     lock,
 ):
