@@ -1477,13 +1477,7 @@ def main():
 
     lock = load_lock()
 
-    # ---------------------------------------------------------
-    # Verify the Kaggle runtime before changing anything.
-    # ---------------------------------------------------------
-
-    verify_runtime(
-        lock
-    )
+   
 
     # ---------------------------------------------------------
     # Install exact locked ComfyUI revision.
@@ -1518,7 +1512,7 @@ def main():
     # ---------------------------------------------------------
     # Verify runtime after package installation.
     # ---------------------------------------------------------
-
+     
     verify_runtime(
         lock
     )
