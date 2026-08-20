@@ -178,7 +178,6 @@ MODERN_LATENT_LOADER = (
 )
 
 
-
 # ============================================================================
 # ERROR HELPERS
 # ============================================================================
@@ -458,7 +457,6 @@ def check_files() -> None:
             f"{path}",
         )
 
-
     print(
         f"OK   repository files: "
         f"{len(required)}"
@@ -613,8 +611,7 @@ def check_lock(
         and all(
             character
             in "0123456789abcdef"
-            for character
-            in commit.lower()
+            for character in commit.lower()
         ),
         "ComfyUI lock commit must be "
         "a 40-character SHA.",
@@ -1129,10 +1126,6 @@ def check_kaggle_wiring() -> None:
         BOOTSTRAP
     )
 
-    tunnel = read_text(
-        START_COMFYUI_TUNNEL
-    )
-
     preflight = read_text(
         PREFLIGHT_MODERN
     )
@@ -1160,10 +1153,10 @@ def check_kaggle_wiring() -> None:
     )
 
     require(
-        "start_comfyui_tunnel.py"
+        "start_comfyui.py"
         in launch,
         "launch.py is not wired to "
-        "start_comfyui_tunnel.py.",
+        "start_comfyui.py.",
     )
 
     # ------------------------------------------------------------------------
@@ -1177,7 +1170,6 @@ def check_kaggle_wiring() -> None:
         "lock-driven.",
     )
 
-    
     # ------------------------------------------------------------------------
     # modern preflight
     # ------------------------------------------------------------------------
@@ -1189,17 +1181,16 @@ def check_kaggle_wiring() -> None:
         "lock-driven.",
     )
 
-    
     # ------------------------------------------------------------------------
-    # tunnel
+    # start_comfyui.py
     # ------------------------------------------------------------------------
 
     require(
         str(
             CANONICAL_COMFYUI_PORT
         )
-        in tunnel,
-        "ComfyUI tunnel launcher is not "
+        in start_comfyui,
+        "ComfyUI launcher is not "
         "using canonical port 8188.",
     )
 
@@ -1207,20 +1198,9 @@ def check_kaggle_wiring() -> None:
         str(
             STALE_COMFYUI_PORT
         )
-        not in tunnel,
-        "ComfyUI tunnel launcher contains "
+        not in start_comfyui,
+        "ComfyUI launcher contains "
         "stale port 8219.",
-    )
-
-    # ------------------------------------------------------------------------
-    # compatibility wrapper
-    # ------------------------------------------------------------------------
-
-    require(
-        "launch.py"
-        in start_comfyui,
-        "start_comfyui.py does not "
-        "delegate to launch.py.",
     )
 
     print(
@@ -1232,7 +1212,7 @@ def check_kaggle_wiring() -> None:
     )
 
     print(
-        "OK   canonical tunnel port: "
+        "OK   canonical ComfyUI port: "
         f"{CANONICAL_COMFYUI_PORT}"
     )
 
@@ -1350,7 +1330,6 @@ def check_self_contract() -> None:
         "compatibility_lock.yaml.",
     )
 
-
     # ------------------------------------------------------------------------
     # Modern/legacy adapter contract.
     # ------------------------------------------------------------------------
@@ -1384,8 +1363,8 @@ def check_port_contract() -> None:
         GENERATE_VIDEO
     )
 
-    tunnel = read_text(
-        START_COMFYUI_TUNNEL
+    start_comfyui = read_text(
+        START_COMFYUI
     )
 
     live = read_text(
@@ -1406,6 +1385,7 @@ def check_port_contract() -> None:
     )
 
     # 8219 is permitted ONLY as the intentional stale guard.
+
     tree = parse_python(
         GENERATE_VIDEO
     )
@@ -1455,16 +1435,24 @@ def check_port_contract() -> None:
     )
 
     # ------------------------------------------------------------------------
-    # Tunnel
+    # ComfyUI launcher
     # ------------------------------------------------------------------------
 
+    require(
+        str(
+            CANONICAL_COMFYUI_PORT
+        )
+        in start_comfyui,
+        "start_comfyui.py does not "
+        "use canonical port 8188.",
+    )
 
     require(
         str(
             STALE_COMFYUI_PORT
         )
-        not in tunnel,
-        "start_comfyui_tunnel.py contains "
+        not in start_comfyui,
+        "start_comfyui.py contains "
         "stale port 8219.",
     )
 
@@ -1508,7 +1496,6 @@ def check_validator_alignment() -> None:
     required = {
         "scripts/cpu_preflight.py",
         "compatibility_lock.yaml",
-        "runtime_requirements.lock",
         "LatentUpscaleModelLoader",
         "LTXVLatentUpsamplerModelLoader",
         "8188",
@@ -1617,6 +1604,7 @@ def main() -> None:
         "  kaggle/compatibility_lock.yaml"
     )
 
+    print()
 
     print(
         "Canonical ComfyUI runtime port:"
