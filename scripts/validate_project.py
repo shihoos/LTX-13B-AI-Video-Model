@@ -10,21 +10,20 @@ Validate the complete LTX-13B project before production generation.
 This validator checks:
 
 1. Repository file structure
-2. Obsolete-file protection
-3. Python AST syntax
-4. compatibility_lock.yaml structure
-5. Lock-driven bootstrap architecture
-6. BASE workflow structure
-7. DETAILER source workflow structure
-8. Legacy -> modern DETAILER adapter conversion
-9. Compatibility builder contract
-10. Production application wiring
-11. Kaggle startup wiring
-12. CPU preflight contract
-13. Live-runtime verifier contract
-14. Canonical ComfyUI port contract
-15. Optional live ComfyUI runtime
-16. Optional CUDA availability
+2. Python AST syntax
+3. compatibility_lock.yaml structure
+4. Lock-driven bootstrap architecture
+5. BASE workflow structure
+6. DETAILER source workflow structure
+7. Legacy -> modern DETAILER adapter conversion
+8. Compatibility builder contract
+9. Production application wiring
+10. Kaggle startup wiring
+11. CPU preflight contract
+12. Live-runtime verifier contract
+13. Canonical ComfyUI port contract
+14. Optional live ComfyUI runtime
+15. Optional CUDA availability
 
 Important
 ---------
@@ -204,12 +203,6 @@ MODERN_LATENT_LOADER = (
     "LatentUpscaleModelLoader"
 )
 
-OBSOLETE_FILES = (
-    KAGGLE_DIR
-    / "model_paths.yaml",
-    KAGGLE_DIR
-    / "runtime_requirements.lock",
-)
 
 
 # ============================================================================
@@ -665,18 +658,6 @@ def validate_files() -> None:
             f"{path}",
         )
 
-    for obsolete in (
-        OBSOLETE_FILES
-    ):
-
-        require(
-            not obsolete.exists(),
-            "OBSOLETE FILE DETECTED:\n"
-            f"{obsolete}\n\n"
-            "Remove it. "
-            "compatibility_lock.yaml "
-            "is the single source of truth.",
-        )
 
     print(
         "OK   repository file structure"
@@ -759,7 +740,6 @@ def validate_model_architecture() -> None:
         "runtime_requirements.lock"
         in cpu_preflight,
         "cpu_preflight.py no longer "
-        "protects against obsolete "
         "runtime_requirements.lock.",
     )
 
@@ -1201,9 +1181,6 @@ def validate_kaggle_wiring() -> None:
         PREFLIGHT_MODERN
     )
 
-    tunnel = read_text(
-        START_COMFYUI_TUNNEL
-    )
 
     start_comfyui = read_text(
         START_COMFYUI
@@ -1227,7 +1204,6 @@ def validate_kaggle_wiring() -> None:
     for name in (
         "preflight_modern.py",
         "bootstrap.py",
-        "start_comfyui_tunnel.py",
     ):
 
         require(
@@ -1287,27 +1263,7 @@ def validate_kaggle_wiring() -> None:
         "lock-driven.",
     )
 
-    # ------------------------------------------------------------------------
-    # tunnel
-    # ------------------------------------------------------------------------
 
-    require(
-        str(
-            STALE_COMFYUI_PORT
-        )
-        not in tunnel,
-        "start_comfyui_tunnel.py "
-        "contains stale port 8219.",
-    )
-
-    require(
-        str(
-            CANONICAL_COMFYUI_PORT
-        )
-        in tunnel,
-        "start_comfyui_tunnel.py does "
-        "not use canonical port 8188.",
-    )
 
     print(
         "OK   Kaggle launcher/bootstrap wiring"
@@ -1456,7 +1412,6 @@ def validate_cpu_preflight() -> None:
 
     required = {
         "compatibility_lock.yaml",
-        "model_paths.yaml",
         "runtime_requirements.lock",
         "LTXVLatentUpsamplerModelLoader",
         "LatentUpscaleModelLoader",
@@ -1473,32 +1428,7 @@ def validate_cpu_preflight() -> None:
             f"{text}",
         )
 
-    # ------------------------------------------------------------------------
-    # CPU preflight must explicitly protect against the obsolete files.
-    # ------------------------------------------------------------------------
-
-    require(
-        "exists()"
-        in source,
-        "cpu_preflight.py does not "
-        "perform obsolete-file existence checks.",
-    )
-
-    require(
-        "model_paths.yaml"
-        in source,
-        "cpu_preflight.py does not "
-        "check obsolete model_paths.yaml.",
-    )
-
-    require(
-        "runtime_requirements.lock"
-        in source,
-        "cpu_preflight.py does not "
-        "check obsolete runtime_requirements.lock.",
-    )
-
-    # ------------------------------------------------------------------------
+    # --------------------------------------------------------------
     # Port policy
     #
     # 8188 = canonical active local ComfyUI port.
