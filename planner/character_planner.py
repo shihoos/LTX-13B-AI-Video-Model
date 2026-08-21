@@ -2,6 +2,14 @@ import json
 
 from pathlib import Path
 
+from execution.comfy_client import (
+    ComfyClient,
+)
+
+from execution.reference_image_generator import (
+    ReferenceImageGenerator,
+)
+
 from planner.qwen_loader import (
     QwenStoryModel,
 )
@@ -24,6 +32,7 @@ class CharacterPlanner:
     def __init__(
         self,
         model=None,
+        reference_generator=None,
     ):
 
         self.model = (
@@ -34,6 +43,22 @@ class CharacterPlanner:
 
         self.references = (
             ReferenceManager()
+        )
+
+        if reference_generator is None:
+
+            reference_generator = (
+                ReferenceImageGenerator(
+                    client=ComfyClient(
+                        base_url=(
+                            "http://127.0.0.1:8188"
+                        )
+                    )
+                )
+            )
+
+        self.reference_generator = (
+            reference_generator
         )
 
     def _read_prompt(self) -> str:
@@ -107,9 +132,9 @@ class CharacterPlanner:
             {
                 "role": "system",
                 "content": (
-                    "You are a cinematic character "
-                    "planning system. Return only "
-                    "valid JSON."
+                    "You are a cinematic "
+                    "character planning system. "
+                    "Return only valid JSON."
                 ),
             },
             {
@@ -147,6 +172,7 @@ class CharacterPlanner:
             ).strip()
 
             if not name:
+
                 continue
 
             reference = (
@@ -164,6 +190,72 @@ class CharacterPlanner:
                     )
                 )
 
+            description = item.get(
+                "description",
+                "",
+            )
+
+            personality = item.get(
+                "personality",
+                "",
+            )
+
+            appearance = item.get(
+                "appearance",
+                {},
+            )
+
+            clothing = item.get(
+                "clothing",
+                {},
+            )
+
+            distinctive_features = (
+                item.get(
+                    "distinctive_features",
+                    [],
+                )
+            )
+
+            if (
+                reference.get("mode")
+                == "missing"
+            ):
+
+                generated_path = (
+                    self.reference_generator
+                    .generate(
+                        character_name=name,
+                        description=(
+                            description
+                        ),
+                        personality=(
+                            personality
+                        ),
+                        appearance=(
+                            appearance
+                        ),
+                        clothing=(
+                            clothing
+                        ),
+                        distinctive_features=(
+                            distinctive_features
+                        ),
+                    )
+                )
+
+                reference = {
+                    "mode": "generated",
+                    "path": str(
+                        generated_path
+                    ),
+                    "message": (
+                        "Generated and stored "
+                        "a persistent character "
+                        "reference."
+                    ),
+                }
+
             characters.append(
                 Character(
                     character_id=(
@@ -178,35 +270,30 @@ class CharacterPlanner:
                         "",
                     ),
 
-                    description=item.get(
-                        "description",
-                        "",
+                    description=(
+                        description
                     ),
 
-                    personality=item.get(
-                        "personality",
-                        "",
+                    personality=(
+                        personality
                     ),
 
-                    appearance=item.get(
-                        "appearance",
-                        {},
+                    appearance=(
+                        appearance
                     ),
 
-                    clothing=item.get(
-                        "clothing",
-                        {},
+                    clothing=(
+                        clothing
                     ),
 
-                    distinctive_features=item.get(
-                        "distinctive_features",
-                        [],
+                    distinctive_features=(
+                        distinctive_features
                     ),
 
                     reference_mode=(
                         reference.get(
                             "mode",
-                            "auto",
+                            "missing",
                         )
                     ),
 
