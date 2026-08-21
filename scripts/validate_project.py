@@ -1163,6 +1163,187 @@ def validate_real_detailer_conversion() -> None:
     )
 
 
+
+# ============================================================================
+# 10. PLANNING CONTRACTS
+# ============================================================================
+
+def validate_planning_contracts() -> None:
+
+    config_source = read_text(
+        PROJECT_ROOT
+        / "planner"
+        / "config.py"
+    )
+
+    character_schema = read_text(
+        PROJECT_ROOT
+        / "schemas"
+        / "character.py"
+    )
+
+    scene_schema = read_text(
+        PROJECT_ROOT
+        / "schemas"
+        / "scene.py"
+    )
+
+    character_planner = read_text(
+        PROJECT_ROOT
+        / "planner"
+        / "character_planner.py"
+    )
+
+    scene_planner = read_text(
+        PROJECT_ROOT
+        / "planner"
+        / "scene_planner.py"
+    )
+
+    shot_planner = read_text(
+        PROJECT_ROOT
+        / "planner"
+        / "shot_planner.py"
+    )
+
+    character_prompt = read_text(
+        PROJECT_ROOT
+        / "prompts"
+        / "qwen"
+        / "character_plan.txt"
+    )
+
+    scene_prompt = read_text(
+        PROJECT_ROOT
+        / "prompts"
+        / "qwen"
+        / "scene_plan.txt"
+    )
+
+    required_config = {
+        "QWEN_STORY_TEMPERATURE",
+        "QWEN_CHARACTER_DETECTION_TEMPERATURE",
+        "QWEN_CHARACTER_PLAN_TEMPERATURE",
+        "QWEN_SCENE_PLAN_TEMPERATURE",
+        "QWEN_SHOT_PLAN_TEMPERATURE",
+    }
+
+    for text in required_config:
+
+        require(
+            text in config_source,
+            "planner/config.py missing "
+            "Qwen planning contract:\n"
+            f"{text}",
+        )
+
+    required_character_schema = {
+        "character_state",
+        "reference_mode",
+        "reference_path",
+        "continuity_rules",
+    }
+
+    for text in required_character_schema:
+
+        require(
+            text in character_schema,
+            "schemas/character.py missing "
+            "character contract:\n"
+            f"{text}",
+        )
+
+    required_scene_schema = {
+        "weather",
+        "atmosphere",
+        "environment_details",
+        "key_props",
+        "scene_objective",
+        "mood",
+        "lighting",
+    }
+
+    for text in required_scene_schema:
+
+        require(
+            text in scene_schema,
+            "schemas/scene.py missing "
+            "scene contract:\n"
+            f"{text}",
+        )
+
+    require(
+        "character_state" in character_planner,
+        "character_planner.py does not "
+        "propagate character_state.",
+    )
+
+    required_scene_planner = {
+        "weather",
+        "atmosphere",
+        "environment_details",
+        "key_props",
+        "scene_objective",
+    }
+
+    for text in required_scene_planner:
+
+        require(
+            text in scene_planner,
+            "scene_planner.py missing "
+            "scene field:\n"
+            f"{text}",
+        )
+
+    require(
+        "QWEN_SHOT_PLAN_TEMPERATURE"
+        in shot_planner,
+        "shot_planner.py does not use "
+        "QWEN_SHOT_PLAN_TEMPERATURE.",
+    )
+
+    required_character_prompt = {
+        "character_state",
+        "emotional_state",
+        "physical_state",
+        "clothing_state",
+        "carried_objects",
+        "injuries",
+    }
+
+    for text in required_character_prompt:
+
+        require(
+            text in character_prompt,
+            "character_plan.txt missing "
+            "character-state contract:\n"
+            f"{text}",
+        )
+
+    required_scene_prompt = {
+        "weather",
+        "atmosphere",
+        "environment_details",
+        "key_props",
+        "scene_objective",
+        "mood",
+        "lighting",
+    }
+
+    for text in required_scene_prompt:
+
+        require(
+            text in scene_prompt,
+            "scene_plan.txt missing "
+            "scene contract:\n"
+            f"{text}",
+        )
+
+    print(
+        "OK   planning/schema contract"
+    )
+
+
 # ============================================================================
 # COMPATIBILITY BUILDER
 # ============================================================================
@@ -2117,6 +2298,7 @@ def validate_reference_image_generator() -> None:
         "data/characters/generated",
         "get_object_info",
         "find_image_outputs",
+        "character_state",
     }
 
     for text in required:
@@ -2157,23 +2339,89 @@ def validate_multi_reference_execution() -> None:
             f"{text}",
         )
 
-    require(
-        "[:5]"
-        not in source,
-        "shot_executor.py contains "
-        "an unintended five-reference limit.",
+    tree = parse_python(
+        SHOT_EXECUTOR
     )
 
+    for node in ast.walk(
+        tree
+    ):
+
+        if not isinstance(
+            node,
+            ast.Subscript,
+        ):
+            continue
+
+        value = node.value
+
+        is_reference_sequence = (
+            (
+                isinstance(
+                    value,
+                    ast.Name,
+                )
+                and value.id
+                in {
+                    "references",
+                    "reference_images",
+                }
+            )
+            or
+            (
+                isinstance(
+                    value,
+                    ast.Attribute,
+                )
+                and value.attr
+                == "reference_images"
+            )
+        )
+
+        if not is_reference_sequence:
+            continue
+
+        slice_node = node.slice
+
+        if isinstance(
+            slice_node,
+            ast.Slice,
+        ):
+
+            upper = slice_node.upper
+
+            if (
+                isinstance(
+                    upper,
+                    ast.Constant,
+                )
+                and isinstance(
+                    upper.value,
+                    int,
+                )
+                and upper.value
+                in {
+                    5,
+                    7,
+                }
+            ):
+
+                fail(
+                    "shot_executor.py contains "
+                    "an unintended hardcoded "
+                    f"{upper.value}-reference limit."
+                )
+
     require(
-        "[:7]"
-        not in source,
-        "shot_executor.py contains "
-        "an unintended seven-reference limit.",
+        "len(" in source,
+        "shot_executor.py does not "
+        "derive reference count dynamically.",
     )
 
     print(
         "OK   multi-reference execution contract"
     )
+
 
 # ============================================================================
 # MAIN
@@ -2277,6 +2525,8 @@ def main() -> None:
     validate_model_architecture()
 
     validate_workflows()
+
+    validate_planning_contracts()
 
     validate_adapter()
 
