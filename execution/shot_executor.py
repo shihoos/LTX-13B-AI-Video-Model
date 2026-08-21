@@ -33,6 +33,18 @@ class ShotExecutor:
             → create one dynamic composite reference image
               containing every reference image
 
+    Character identity masks:
+
+        0 references
+            → no identity mask
+
+        1 reference
+            → use the original identity mask directly
+
+        2+ references
+            → create one dynamic composite identity mask
+              matching the reference-image layout
+
     There is no hardcoded character/reference-count limit.
     """
 
@@ -133,6 +145,79 @@ class ShotExecutor:
         source = (
             self._validate_reference_paths(
                 [reference_path],
+                shot_id,
+            )[0]
+        )
+
+        destination = (
+            self.comfy_input_dir
+            / (
+                f"{shot_id}_"
+                f"{source.name}"
+            )
+        )
+
+        shutil.copy2(
+            source,
+            destination,
+        )
+
+        return destination.name
+
+    # ========================================================
+    # IDENTITY MASK
+    # ========================================================
+
+    @staticmethod
+    def _validate_mask_paths(
+        mask_paths: list[str],
+        shot_id: str,
+    ) -> list[Path]:
+
+        paths = []
+
+        for mask_path in (
+            mask_paths
+        ):
+
+            source = Path(
+                mask_path
+            )
+
+            if not source.is_file():
+
+                raise FileNotFoundError(
+                    f"[{shot_id}] "
+                    "Reference mask does not exist:\n"
+                    f"{source}"
+                )
+
+            if (
+                source.stat().st_size
+                <= 0
+            ):
+
+                raise RuntimeError(
+                    f"[{shot_id}] "
+                    "Reference mask is empty:\n"
+                    f"{source}"
+                )
+
+            paths.append(
+                source
+            )
+
+        return paths
+
+    def _copy_reference_mask(
+        self,
+        mask_path: str,
+        shot_id: str,
+    ) -> str:
+
+        source = (
+            self._validate_mask_paths(
+                [mask_path],
                 shot_id,
             )[0]
         )
@@ -350,10 +435,196 @@ class ShotExecutor:
 
         return destination
 
+    def _compose_reference_masks(
+        self,
+        mask_paths: list[str],
+        reference_paths: list[str],
+        shot_id: str,
+    ) -> Path:
+
+        masks = (
+            self._validate_mask_paths(
+                mask_paths,
+                shot_id,
+            )
+        )
+
+        references = (
+            self._validate_reference_paths(
+                reference_paths,
+                shot_id,
+            )
+        )
+
+        if len(masks) != len(
+            references
+        ):
+
+            raise RuntimeError(
+                f"[{shot_id}] "
+                "Reference image/mask count "
+                "does not match."
+            )
+
+        destination = (
+            self.comfy_input_dir
+            / (
+                f"{shot_id}_"
+                "character_reference_mask.png"
+            )
+        )
+
+        if len(masks) == 1:
+
+            shutil.copy2(
+                masks[0],
+                destination,
+            )
+
+            return destination
+
+        try:
+
+            images = [
+                Image.open(
+                    path
+                ).convert(
+                    "L"
+                )
+                for path
+                in masks
+            ]
+
+            try:
+
+                max_width = max(
+                    image.width
+                    for image
+                    in images
+                )
+
+                max_height = max(
+                    image.height
+                    for image
+                    in images
+                )
+
+                tile_width = max_width
+                tile_height = max_height
+
+                columns, rows = (
+                    self._grid_dimensions(
+                        len(images)
+                    )
+                )
+
+                canvas_width = (
+                    columns
+                    * tile_width
+                )
+
+                canvas_height = (
+                    rows
+                    * tile_height
+                )
+
+                canvas = Image.new(
+                    "L",
+                    (
+                        canvas_width,
+                        canvas_height,
+                    ),
+                    0,
+                )
+
+                for index, image in enumerate(
+                    images
+                ):
+
+                    image.thumbnail(
+                        (
+                            tile_width,
+                            tile_height,
+                        ),
+                        Image.Resampling.LANCZOS,
+                    )
+
+                    x = (
+                        (
+                            index
+                            % columns
+                        )
+                        * tile_width
+                        + (
+                            tile_width
+                            - image.width
+                        )
+                        // 2
+                    )
+
+                    y = (
+                        (
+                            index
+                            // columns
+                        )
+                        * tile_height
+                        + (
+                            tile_height
+                            - image.height
+                        )
+                        // 2
+                    )
+
+                    canvas.paste(
+                        image,
+                        (
+                            x,
+                            y,
+                        ),
+                    )
+
+                canvas.save(
+                    destination,
+                    format="PNG",
+                )
+
+            finally:
+
+                for image in images:
+
+                    image.close()
+
+        except Exception as error:
+
+            raise RuntimeError(
+                f"[{shot_id}] "
+                "Could not create the "
+                "multi-character reference "
+                "mask:\n"
+                f"{error}"
+            ) from error
+
+        if (
+            not destination.is_file()
+            or
+            destination.stat().st_size <= 0
+        ):
+
+            raise RuntimeError(
+                f"[{shot_id}] "
+                "Multi-character reference "
+                "mask was not created correctly."
+            )
+
+        return destination
+
     def _prepare_shot_reference(
         self,
         shot,
-    ) -> str | None:
+    ) -> tuple[
+        str | None,
+        str | None,
+    ]:
 
         references = [
             str(path)
@@ -365,25 +636,78 @@ class ShotExecutor:
             if str(path).strip()
         ]
 
+        masks = [
+            str(path)
+            for path
+            in (
+                getattr(
+                    shot,
+                    "reference_masks",
+                    [],
+                )
+                or []
+            )
+            if str(path).strip()
+        ]
+
         if not references:
 
-            return None
+            return (
+                None,
+                None,
+            )
+
+        if len(references) != len(
+            masks
+        ):
+
+            raise RuntimeError(
+                f"[{shot.shot_id}] "
+                "Every character reference "
+                "must have a corresponding "
+                "identity mask."
+            )
 
         if len(references) == 1:
 
-            return self._copy_reference(
-                references[0],
-                shot.shot_id,
+            reference_name = (
+                self._copy_reference(
+                    references[0],
+                    shot.shot_id,
+                )
             )
 
-        composite = (
+            mask_name = (
+                self._copy_reference_mask(
+                    masks[0],
+                    shot.shot_id,
+                )
+            )
+
+            return (
+                reference_name,
+                mask_name,
+            )
+
+        composite_image = (
             self._compose_reference_images(
                 references,
                 shot.shot_id,
             )
         )
 
-        return composite.name
+        composite_mask = (
+            self._compose_reference_masks(
+                masks,
+                references,
+                shot.shot_id,
+            )
+        )
+
+        return (
+            composite_image.name,
+            composite_mask.name,
+        )
 
     # ========================================================
     # VIDEO INPUT FOR DETAILER
@@ -468,7 +792,10 @@ class ShotExecutor:
                 int(shot.seed),
             )
 
-        reference_name = (
+        (
+            reference_name,
+            reference_mask_name,
+        ) = (
             self._prepare_shot_reference(
                 shot
             )
@@ -476,9 +803,14 @@ class ShotExecutor:
 
         if reference_name:
 
-            self.workflow_adapter.set_input_image(
+            self.workflow_adapter.set_identity_reference_image(
                 workflow,
                 reference_name,
+            )
+
+            self.workflow_adapter.set_identity_mask_image(
+                workflow,
+                reference_mask_name,
             )
 
             if len(
