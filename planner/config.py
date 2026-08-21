@@ -1,16 +1,19 @@
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = (
+    Path(__file__).resolve().parents[1]
+)
 
 
 # ============================================================
 # QWEN MODEL
 # ============================================================
 
-QWEN_MODEL_ID = "Qwen/Qwen3-4B-Instruct-2507"
+QWEN_MODEL_ID = (
+    "Qwen/Qwen3-4B-Instruct-2507"
+)
 
-# Permanent Kaggle dataset mount.
 QWEN_KAGGLE_PATH = (
     Path("/kaggle/input")
     / "datasets"
@@ -18,7 +21,6 @@ QWEN_KAGGLE_PATH = (
     / "qwen3-4b-instruct-2507"
 )
 
-# Optional local development path.
 QWEN_LOCAL_PATH = (
     PROJECT_ROOT
     / "models"
@@ -26,7 +28,9 @@ QWEN_LOCAL_PATH = (
 )
 
 QWEN_MAX_NEW_TOKENS = 4096
+
 QWEN_TEMPERATURE = 0.7
+
 QWEN_TOP_P = 0.8
 
 
@@ -80,18 +84,67 @@ DATA_DIR = (
     / "data"
 )
 
-STORIES_DIR = DATA_DIR / "stories"
-CHARACTERS_DIR = DATA_DIR / "characters"
-SCENES_DIR = DATA_DIR / "scenes"
-SHOTS_DIR = DATA_DIR / "shots"
-PRODUCTION_DIR = DATA_DIR / "production"
+STORIES_DIR = (
+    DATA_DIR
+    / "stories"
+)
+
+CHARACTERS_DIR = (
+    DATA_DIR
+    / "characters"
+)
+
+GENERATED_CHARACTERS_DIR = (
+    CHARACTERS_DIR
+    / "generated"
+)
+
+SCENES_DIR = (
+    DATA_DIR
+    / "scenes"
+)
+
+SHOTS_DIR = (
+    DATA_DIR
+    / "shots"
+)
+
+PRODUCTION_DIR = (
+    DATA_DIR
+    / "production"
+)
+
+
+# ============================================================
+# REFERENCE IMAGE RUNTIME
+# ============================================================
+
+REFERENCE_IMAGE_HOST = (
+    "127.0.0.1"
+)
+
+REFERENCE_IMAGE_PORT = 8188
+
+REFERENCE_IMAGE_CHECKPOINT = (
+    ""
+)
+
+REFERENCE_IMAGE_WIDTH = 768
+
+REFERENCE_IMAGE_HEIGHT = 768
+
+REFERENCE_IMAGE_STEPS = 28
+
+REFERENCE_IMAGE_CFG = 7.0
 
 
 # ============================================================
 # STORY MODES
 # ============================================================
 
-AI_STORY_MODE = "ai_story"
+AI_STORY_MODE = (
+    "ai_story"
+)
 
 PRESERVE_USER_STORY_MODE = (
     "preserve_user_story"
@@ -114,6 +167,7 @@ def ensure_directories():
     directories = [
         STORIES_DIR,
         CHARACTERS_DIR,
+        GENERATED_CHARACTERS_DIR,
         SCENES_DIR,
         SHOTS_DIR,
         PRODUCTION_DIR,
