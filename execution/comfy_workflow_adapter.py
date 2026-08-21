@@ -648,7 +648,7 @@ class ComfyWorkflowAdapter:
             "Use a role-specific image setter."
         )
 
-        @staticmethod
+    @staticmethod
     def set_identity_reference_image(
         workflow,
         filename,
