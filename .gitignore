@@ -3,6 +3,10 @@ __pycache__/
 *.py[cod]
 *.pyo
 
+# Generated character references
+data/characters/generated/*
+!data/characters/generated/.gitkeep
+
 # Environments
 .venv/
 venv/
