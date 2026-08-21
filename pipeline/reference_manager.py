@@ -56,21 +56,6 @@ AUDIO_EXTENSIONS = {
 
 class ReferenceManager:
 
-    """
-    Resolves character and media references.
-
-    Resolution order for character images:
-
-        1. User-provided asset
-           assets/characters/
-
-        2. Previously generated asset
-           data/characters/generated/
-
-        3. Missing
-           The caller may generate a new reference.
-    """
-
     def __init__(self):
 
         self.ensure_directories()
@@ -97,20 +82,20 @@ class ReferenceManager:
         character_name: str,
     ):
 
-        provided = self._find_file(
-            directory=CHARACTERS_DIR,
-            name=character_name,
-            extensions=IMAGE_EXTENSIONS,
+        provided = (
+            self.find_provided_character(
+                character_name
+            )
         )
 
         if provided is not None:
 
             return provided
 
-        return self._find_file(
-            directory=GENERATED_CHARACTERS_DIR,
-            name=character_name,
-            extensions=IMAGE_EXTENSIONS,
+        return (
+            self.find_generated_character(
+                character_name
+            )
         )
 
     def find_provided_character(
@@ -119,9 +104,9 @@ class ReferenceManager:
     ):
 
         return self._find_file(
-            directory=CHARACTERS_DIR,
-            name=character_name,
-            extensions=IMAGE_EXTENSIONS,
+            CHARACTERS_DIR,
+            character_name,
+            IMAGE_EXTENSIONS,
         )
 
     def find_generated_character(
@@ -130,9 +115,9 @@ class ReferenceManager:
     ):
 
         return self._find_file(
-            directory=GENERATED_CHARACTERS_DIR,
-            name=character_name,
-            extensions=IMAGE_EXTENSIONS,
+            GENERATED_CHARACTERS_DIR,
+            character_name,
+            IMAGE_EXTENSIONS,
         )
 
     def find_reference(
@@ -141,9 +126,9 @@ class ReferenceManager:
     ):
 
         return self._find_file(
-            directory=REFERENCES_DIR,
-            name=reference_name,
-            extensions=IMAGE_EXTENSIONS,
+            REFERENCES_DIR,
+            reference_name,
+            IMAGE_EXTENSIONS,
         )
 
     def find_audio(
@@ -152,9 +137,9 @@ class ReferenceManager:
     ):
 
         return self._find_file(
-            directory=AUDIO_DIR,
-            name=audio_name,
-            extensions=AUDIO_EXTENSIONS,
+            AUDIO_DIR,
+            audio_name,
+            AUDIO_EXTENSIONS,
         )
 
     def find_music(
@@ -163,9 +148,9 @@ class ReferenceManager:
     ):
 
         return self._find_file(
-            directory=MUSIC_DIR,
-            name=music_name,
-            extensions=AUDIO_EXTENSIONS,
+            MUSIC_DIR,
+            music_name,
+            AUDIO_EXTENSIONS,
         )
 
     def _find_file(
@@ -186,7 +171,9 @@ class ReferenceManager:
             .replace(" ", "_")
         )
 
-        for file_path in directory.iterdir():
+        for file_path in (
+            directory.iterdir()
+        ):
 
             if not file_path.is_file():
 
