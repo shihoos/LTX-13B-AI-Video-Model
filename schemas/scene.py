@@ -17,6 +17,10 @@ class Scene:
 
     description: str = ""
 
+    mood: str = ""
+
+    lighting: str = ""
+
     characters: list = field(
         default_factory=list
     )
@@ -46,6 +50,12 @@ class Scene:
 
             "description":
                 self.description,
+
+            "mood":
+                self.mood,
+
+            "lighting":
+                self.lighting,
 
             "characters":
                 self.characters,
