@@ -31,6 +31,13 @@ MUSIC_DIR = (
     / "music"
 )
 
+GENERATED_CHARACTERS_DIR = (
+    PROJECT_ROOT
+    / "data"
+    / "characters"
+    / "generated"
+)
+
 
 IMAGE_EXTENSIONS = {
     ".png",
@@ -50,10 +57,18 @@ AUDIO_EXTENSIONS = {
 class ReferenceManager:
 
     """
-    Resolves optional user-provided assets.
+    Resolves character and media references.
 
-    Character assets are matched by filename, ignoring
-    letter case and normalizing spaces to underscores.
+    Resolution order for character images:
+
+        1. User-provided asset
+           assets/characters/
+
+        2. Previously generated asset
+           data/characters/generated/
+
+        3. Missing
+           The caller may generate a new reference.
     """
 
     def __init__(self):
@@ -67,6 +82,7 @@ class ReferenceManager:
             REFERENCES_DIR,
             AUDIO_DIR,
             MUSIC_DIR,
+            GENERATED_CHARACTERS_DIR,
         ]
 
         for directory in directories:
@@ -81,8 +97,40 @@ class ReferenceManager:
         character_name: str,
     ):
 
+        provided = self._find_file(
+            directory=CHARACTERS_DIR,
+            name=character_name,
+            extensions=IMAGE_EXTENSIONS,
+        )
+
+        if provided is not None:
+
+            return provided
+
+        return self._find_file(
+            directory=GENERATED_CHARACTERS_DIR,
+            name=character_name,
+            extensions=IMAGE_EXTENSIONS,
+        )
+
+    def find_provided_character(
+        self,
+        character_name: str,
+    ):
+
         return self._find_file(
             directory=CHARACTERS_DIR,
+            name=character_name,
+            extensions=IMAGE_EXTENSIONS,
+        )
+
+    def find_generated_character(
+        self,
+        character_name: str,
+    ):
+
+        return self._find_file(
+            directory=GENERATED_CHARACTERS_DIR,
             name=character_name,
             extensions=IMAGE_EXTENSIONS,
         )
@@ -141,12 +189,14 @@ class ReferenceManager:
         for file_path in directory.iterdir():
 
             if not file_path.is_file():
+
                 continue
 
             if (
                 file_path.suffix.lower()
                 not in extensions
             ):
+
                 continue
 
             file_name = (
@@ -187,7 +237,8 @@ class ReferenceManager:
 
         return sorted(
             file_path.stem
-            for file_path in CHARACTERS_DIR.iterdir()
+            for file_path
+            in CHARACTERS_DIR.iterdir()
             if (
                 file_path.is_file()
                 and
@@ -201,18 +252,18 @@ class ReferenceManager:
         character_name: str,
     ) -> dict:
 
-        reference = (
-            self.find_character(
+        provided = (
+            self.find_provided_character(
                 character_name
             )
         )
 
-        if reference is not None:
+        if provided is not None:
 
             return {
                 "mode": "provided",
                 "path": str(
-                    reference
+                    provided
                 ),
                 "message": (
                     "Use the provided "
@@ -220,15 +271,29 @@ class ReferenceManager:
                 ),
             }
 
+        generated = (
+            self.find_generated_character(
+                character_name
+            )
+        )
+
+        if generated is not None:
+
+            return {
+                "mode": "generated",
+                "path": str(
+                    generated
+                ),
+                "message": (
+                    "Reuse the previously "
+                    "generated character reference."
+                ),
+            }
+
         return {
             "mode": "missing",
             "path": None,
             "message": (
-                "No character reference exists "
-                f"for '{character_name}'. "
-                "The current repository does not "
-                "yet contain a still-image generation "
-                "workflow for creating the missing "
-                "reference."
+                "No character reference exists."
             ),
         }
