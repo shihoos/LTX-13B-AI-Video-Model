@@ -140,7 +140,9 @@ class StoryPlanner:
 
         return self.model.generate(
             messages,
-            temperature=0.2,
+            temperature=(
+                QWEN_PRESERVE_STORY_TEMPERATURE
+            ),
         )
 
     def expand_story(
