@@ -628,14 +628,109 @@ class ComfyWorkflowAdapter:
                 "No LoadImage node."
             )
 
-        for node in nodes:
+        # Existing workflows may contain
+        # exactly one LoadImage node.
+        #
+        # Preserve that behavior.
+        if len(nodes) == 1:
 
-            node.setdefault(
+            nodes[0].setdefault(
                 "inputs",
                 {},
             )[
                 "image"
             ] = filename
+
+            return
+
+        raise RuntimeError(
+            "Multiple LoadImage nodes found. "
+            "Use a role-specific image setter."
+        )
+
+        @staticmethod
+    def set_identity_reference_image(
+        workflow,
+        filename,
+    ):
+
+        nodes = [
+            node
+            for node in workflow.values()
+            if (
+                node.get(
+                    "class_type"
+                )
+                == "LoadImage"
+            )
+            and (
+                node.get(
+                    "title"
+                )
+                == "Identity Reference"
+                or
+                node.get(
+                    "_role"
+                )
+                == "identity_reference"
+            )
+        ]
+
+        if len(nodes) != 1:
+
+            raise RuntimeError(
+                "Expected exactly one "
+                "identity reference LoadImage node."
+            )
+
+        nodes[0].setdefault(
+            "inputs",
+            {},
+        )[
+            "image"
+        ] = filename
+
+    @staticmethod
+    def set_identity_mask_image(
+        workflow,
+        filename,
+    ):
+
+        nodes = [
+            node
+            for node in workflow.values()
+            if (
+                node.get(
+                    "class_type"
+                )
+                == "LoadImage"
+            )
+            and (
+                node.get(
+                    "title"
+                )
+                == "Identity Mask"
+                or
+                node.get(
+                    "_role"
+                )
+                == "identity_mask"
+            )
+        ]
+
+        if len(nodes) != 1:
+
+            raise RuntimeError(
+                "Expected exactly one "
+                "identity mask LoadImage node."
+            )
+
+        nodes[0].setdefault(
+            "inputs",
+            {},
+        )[
+            "image"
+        ] = filename
 
     @staticmethod
     def set_input_video(
