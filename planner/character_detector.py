@@ -8,6 +8,10 @@ from planner.qwen_loader import (
     QwenStoryModel,
 )
 
+from planner.config import (
+    QWEN_CHARACTER_DETECTION_TEMPERATURE,
+)
+
 from schemas.parser import (
     extract_json,
 )
@@ -18,9 +22,9 @@ class CharacterDetector:
     """
     Detect important named characters.
 
-    Character names that already have a matching asset in
-    assets/characters/ are treated as authoritative when they
-    appear in the original user request or generated story.
+    Explicit names corresponding to provided character assets
+    are authoritative when they appear in the original request
+    or generated story.
     """
 
     def __init__(
@@ -119,7 +123,9 @@ class CharacterDetector:
 
         response = self.model.generate(
             messages=messages,
-            temperature=0.2,
+            temperature=(
+                QWEN_CHARACTER_DETECTION_TEMPERATURE
+            ),
         )
 
         data = extract_json(
@@ -138,12 +144,6 @@ class CharacterDetector:
 
             names = []
 
-        # ------------------------------------------------------------
-        # Asset-backed names mentioned by the user or story are
-        # authoritative. This is what preserves names such as "sz"
-        # even if Qwen rewrites the story using another name.
-        # ------------------------------------------------------------
-
         explicit_names = []
 
         for text in (
@@ -157,9 +157,7 @@ class CharacterDetector:
                 )
             ):
 
-                key = name.lower()
-
-                if key not in {
+                if name.lower() not in {
                     item.lower()
                     for item
                     in explicit_names
@@ -170,31 +168,22 @@ class CharacterDetector:
                     )
 
         result = []
-        seen = set()
 
-        # ------------------------------------------------------------
-        # Add authoritative asset-backed names first.
-        # ------------------------------------------------------------
+        seen = set()
 
         for name in explicit_names:
 
             key = name.lower()
 
-            if key in seen:
-                continue
+            if key not in seen:
 
-            seen.add(
-                key
-            )
+                seen.add(
+                    key
+                )
 
-            result.append(
-                name
-            )
-
-        # ------------------------------------------------------------
-        # Add Qwen-detected names that are not already represented
-        # by an authoritative asset-backed name.
-        # ------------------------------------------------------------
+                result.append(
+                    name
+                )
 
         explicit_normalized = {
             re.sub(
@@ -218,21 +207,23 @@ class CharacterDetector:
             name = name.strip()
 
             if not name:
+
                 continue
 
             key = name.lower()
 
             if key in seen:
+
                 continue
 
-            normalized_name = re.sub(
+            normalized = re.sub(
                 r"[^a-z0-9]+",
                 " ",
                 name.lower(),
             ).strip()
 
             if (
-                normalized_name
+                normalized
                 in explicit_normalized
             ):
 
