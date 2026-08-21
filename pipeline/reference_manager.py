@@ -92,6 +92,7 @@ class ReferenceManager:
         )
 
         if provided is not None:
+
             return provided
 
         return (
@@ -163,6 +164,7 @@ class ReferenceManager:
     ):
 
         if not directory.is_dir():
+
             return None
 
         normalized_name = (
@@ -172,15 +174,19 @@ class ReferenceManager:
             .replace(" ", "_")
         )
 
-        for file_path in directory.iterdir():
+        for file_path in (
+            directory.iterdir()
+        ):
 
             if not file_path.is_file():
+
                 continue
 
             if (
                 file_path.suffix.lower()
                 not in extensions
             ):
+
                 continue
 
             file_name = (
@@ -190,7 +196,11 @@ class ReferenceManager:
                 .replace(" ", "_")
             )
 
-            if file_name == normalized_name:
+            if (
+                file_name
+                == normalized_name
+            ):
+
                 return file_path
 
         return None
@@ -212,6 +222,7 @@ class ReferenceManager:
     ) -> list[str]:
 
         if not CHARACTERS_DIR.is_dir():
+
             return []
 
         return sorted(
@@ -230,7 +241,7 @@ class ReferenceManager:
         self,
         character_name: str,
         source_path: Path,
-    ) -> Path:
+    ) -> dict:
 
         return self.processor.process(
             character_name=character_name,
@@ -258,9 +269,23 @@ class ReferenceManager:
             )
 
             return {
-                "mode": "provided",
-                "path": str(processed),
-                "source_path": str(provided),
+                "mode":
+                    "provided",
+
+                "path":
+                    processed["path"],
+
+                "mask_path":
+                    processed["mask_path"],
+
+                "metadata_path":
+                    processed[
+                        "metadata_path"
+                    ],
+
+                "source_path":
+                    str(provided),
+
                 "message": (
                     "Use the provided character "
                     "reference after face-first "
@@ -284,9 +309,23 @@ class ReferenceManager:
             )
 
             return {
-                "mode": "generated",
-                "path": str(processed),
-                "source_path": str(generated),
+                "mode":
+                    "generated",
+
+                "path":
+                    processed["path"],
+
+                "mask_path":
+                    processed["mask_path"],
+
+                "metadata_path":
+                    processed[
+                        "metadata_path"
+                    ],
+
+                "source_path":
+                    str(generated),
+
                 "message": (
                     "Reuse the generated character "
                     "reference after face-first "
@@ -295,10 +334,21 @@ class ReferenceManager:
             }
 
         return {
-            "mode": "missing",
-            "path": None,
-            "source_path": None,
-            "message": (
-                "No character reference exists."
-            ),
+            "mode":
+                "missing",
+
+            "path":
+                None,
+
+            "mask_path":
+                None,
+
+            "metadata_path":
+                None,
+
+            "source_path":
+                None,
+
+            "message":
+                "No character reference exists.",
         }
