@@ -3,8 +3,18 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from execution.comfy_client import (
+    ComfyClient,
+)
+
+from execution.reference_image_generator import (
+    ReferenceImageGenerator,
+)
+
 from planner.config import (
     PRODUCTION_DIR,
+    REFERENCE_IMAGE_HOST,
+    REFERENCE_IMAGE_PORT,
     ensure_directories,
 )
 
@@ -81,14 +91,26 @@ class ProductionOrchestrator:
             ContinuityManager()
         )
 
+        self.reference_generator = (
+            ReferenceImageGenerator(
+                client=ComfyClient(
+                    base_url=(
+                        "http://"
+                        f"{REFERENCE_IMAGE_HOST}:"
+                        f"{REFERENCE_IMAGE_PORT}"
+                    )
+                )
+            )
+        )
+
     # ============================================================
-    # PLANNING PREVIEW
+    # PREVIEWS
     # ============================================================
 
     @staticmethod
     def _print_story_preview(
         story: str,
-    ) -> None:
+    ):
 
         print()
         print("=" * 80)
@@ -99,17 +121,12 @@ class ProductionOrchestrator:
     @staticmethod
     def _print_character_preview(
         characters: list,
-    ) -> None:
+    ):
 
         print()
         print("=" * 80)
         print("CHARACTER PLAN")
         print("=" * 80)
-
-        if not characters:
-
-            print("No characters detected.")
-            return
 
         for character in characters:
 
@@ -156,20 +173,23 @@ class ProductionOrchestrator:
                 )
             )
 
-            if character.reference_path:
-
-                print(
-                    "  Reference: "
-                    f"{character.reference_mode.upper()} "
-                    f"→ {character.reference_path}"
+            print(
+                "  Character state: "
+                + json.dumps(
+                    character.character_state,
+                    ensure_ascii=False,
                 )
+            )
 
-            else:
-
-                print(
-                    "  Reference: "
-                    f"{character.reference_mode.upper()}"
+            print(
+                f"  Reference: "
+                f"{character.reference_mode.upper()}"
+                + (
+                    f" → {character.reference_path}"
+                    if character.reference_path
+                    else ""
                 )
+            )
 
             if character.continuity_rules:
 
@@ -184,27 +204,18 @@ class ProductionOrchestrator:
     @staticmethod
     def _print_scene_preview(
         scenes: list,
-    ) -> None:
+    ):
 
         print()
         print("=" * 80)
         print("SCENE PLAN")
         print("=" * 80)
 
-        if not scenes:
-
-            print("No scenes created.")
-            return
-
         for scene in scenes:
 
             print()
             print(
                 f"{scene.scene_id}"
-            )
-
-            print(
-                f"  Order: {scene.order}"
             )
 
             print(
@@ -215,6 +226,16 @@ class ProductionOrchestrator:
             print(
                 f"  Time of day: "
                 f"{scene.time_of_day}"
+            )
+
+            print(
+                f"  Weather: "
+                f"{scene.weather}"
+            )
+
+            print(
+                f"  Atmosphere: "
+                f"{scene.atmosphere}"
             )
 
             print(
@@ -230,6 +251,27 @@ class ProductionOrchestrator:
             print(
                 f"  Lighting: "
                 f"{scene.lighting}"
+            )
+
+            print(
+                "  Environment details: "
+                + json.dumps(
+                    scene.environment_details,
+                    ensure_ascii=False,
+                )
+            )
+
+            print(
+                "  Key props: "
+                + json.dumps(
+                    scene.key_props,
+                    ensure_ascii=False,
+                )
+            )
+
+            print(
+                f"  Scene objective: "
+                f"{scene.scene_objective}"
             )
 
             print(
@@ -257,17 +299,12 @@ class ProductionOrchestrator:
     @staticmethod
     def _print_shot_preview(
         shots: list,
-    ) -> None:
+    ):
 
         print()
         print("=" * 80)
         print("SHOT PLAN")
         print("=" * 80)
-
-        if not shots:
-
-            print("No shots created.")
-            return
 
         for shot in shots:
 
@@ -282,11 +319,6 @@ class ProductionOrchestrator:
             )
 
             print(
-                f"  Order: "
-                f"{shot.order}"
-            )
-
-            print(
                 f"  Duration: "
                 f"{shot.duration_seconds}s"
             )
@@ -294,11 +326,6 @@ class ProductionOrchestrator:
             print(
                 f"  Characters: "
                 f"{', '.join(shot.characters)}"
-            )
-
-            print(
-                f"  Location: "
-                f"{shot.location}"
             )
 
             print(
@@ -326,24 +353,16 @@ class ProductionOrchestrator:
                 f"{shot.mood}"
             )
 
-            if shot.visual_prompt:
-
-                print(
-                    "  Visual prompt:"
-                )
-
-                print(
-                    f"    {shot.visual_prompt}"
-                )
+            print(
+                f"  Visual prompt: "
+                f"{shot.visual_prompt}"
+            )
 
             if shot.negative_prompt:
 
                 print(
-                    "  Negative prompt:"
-                )
-
-                print(
-                    f"    {shot.negative_prompt}"
+                    f"  Negative prompt: "
+                    f"{shot.negative_prompt}"
                 )
 
             if shot.seed is not None:
@@ -353,49 +372,136 @@ class ProductionOrchestrator:
                     f"{shot.seed}"
                 )
 
-            if shot.reference_images:
-
-                print(
-                    "  Reference images:"
-                )
-
-                for image in (
-                    shot.reference_images
-                ):
-
-                    print(
-                        f"    → {image}"
+            print(
+                "  Reference images: "
+                + (
+                    ", ".join(
+                        shot.reference_images
                     )
-
-            else:
-
-                print(
-                    "  Reference images: NONE"
+                    if shot.reference_images
+                    else "NONE"
                 )
-
-            if shot.previous_shot:
-
-                print(
-                    f"  Previous shot: "
-                    f"{shot.previous_shot}"
-                )
-
-            if shot.next_shot:
-
-                print(
-                    f"  Next shot: "
-                    f"{shot.next_shot}"
-                )
+            )
 
             if shot.continuity_notes:
 
                 print(
-                    "  Continuity:"
+                    f"  Continuity: "
+                    f"{shot.continuity_notes}"
                 )
 
-                print(
-                    f"    {shot.continuity_notes}"
+    # ============================================================
+    # CHARACTER REFERENCES
+    # ============================================================
+
+    def _resolve_character_references(
+        self,
+        characters: list,
+        shots: list,
+    ) -> None:
+
+        missing_characters = [
+            character
+            for character
+            in characters
+            if (
+                character.reference_mode
+                == "missing"
+            )
+        ]
+
+        if not missing_characters:
+
+            return
+
+        print()
+        print("=" * 80)
+        print("GENERATING MISSING CHARACTER REFERENCES")
+        print("=" * 80)
+
+        # Qwen is no longer needed after all planning is complete.
+        self.unload_models()
+
+        for character in (
+            missing_characters
+        ):
+
+            print()
+            print(
+                f"Generating reference: "
+                f"{character.name}"
+            )
+
+            generated_path = (
+                self.reference_generator
+                .generate(
+                    character_name=(
+                        character.name
+                    ),
+                    description=(
+                        character.description
+                    ),
+                    personality=(
+                        character.personality
+                    ),
+                    appearance=(
+                        character.appearance
+                    ),
+                    clothing=(
+                        character.clothing
+                    ),
+                    distinctive_features=(
+                        character.distinctive_features
+                    ),
+                    character_state=(
+                        character.character_state
+                    ),
                 )
+            )
+
+            character.reference_mode = (
+                "generated"
+            )
+
+            character.reference_path = (
+                str(generated_path)
+            )
+
+            print(
+                f"Generated reference: "
+                f"{generated_path}"
+            )
+
+        # ------------------------------------------------------------
+        # Attach the final reference path to every relevant shot.
+        # ------------------------------------------------------------
+
+        reference_by_character = {
+            character.name.lower():
+                character.reference_path
+            for character in characters
+            if character.reference_path
+        }
+
+        for shot in shots:
+
+            shot.reference_images = []
+
+            for character_name in (
+                shot.characters
+            ):
+
+                reference = (
+                    reference_by_character.get(
+                        character_name.lower()
+                    )
+                )
+
+                if reference:
+
+                    shot.reference_images.append(
+                        reference
+                    )
 
     # ============================================================
     # REFERENCE VALIDATION
@@ -412,6 +518,13 @@ class ProductionOrchestrator:
         for character in characters:
 
             if not character.reference_path:
+
+                missing.append(
+                    (
+                        character.name,
+                        "NO_REFERENCE",
+                    )
+                )
 
                 continue
 
@@ -445,25 +558,23 @@ class ProductionOrchestrator:
                 shot.reference_images
             ):
 
-                path = Path(
+                if not Path(
                     image_path
-                )
-
-                if not path.is_file():
+                ).is_file():
 
                     missing.append(
                         (
                             shot.shot_id,
-                            str(path),
+                            str(image_path),
                         )
                     )
 
-        print()
-        print("=" * 80)
-        print("REFERENCE VALIDATION")
-        print("=" * 80)
-
         if missing:
+
+            print()
+            print("=" * 80)
+            print("REFERENCE VALIDATION")
+            print("=" * 80)
 
             for name, path in missing:
 
@@ -473,15 +584,15 @@ class ProductionOrchestrator:
                 )
 
             raise RuntimeError(
-                "Reference validation failed. "
-                "The current BASE workflow is I2V "
-                "and requires a valid input image "
-                "for every shot."
+                "Reference validation failed."
             )
 
+        print()
+        print("=" * 80)
+        print("REFERENCE VALIDATION")
+        print("=" * 80)
         print(
-            "All character and shot reference "
-            "images are valid."
+            "All character and shot references are valid."
         )
 
     # ============================================================
@@ -511,7 +622,6 @@ class ProductionOrchestrator:
             story
         )
 
-        print()
         print("=" * 60)
         print(
             "STEP 2: Detecting characters"
@@ -530,21 +640,12 @@ class ProductionOrchestrator:
             "Characters detected:"
         )
 
-        if character_names:
-
-            for name in character_names:
-
-                print(
-                    f" - {name}"
-                )
-
-        else:
+        for name in character_names:
 
             print(
-                " - None"
+                f" - {name}"
             )
 
-        print()
         print("=" * 60)
         print(
             "STEP 3: Creating character plan"
@@ -570,7 +671,6 @@ class ProductionOrchestrator:
             characters
         )
 
-        print()
         print("=" * 60)
         print(
             "STEP 4: Creating scene plan"
@@ -602,7 +702,6 @@ class ProductionOrchestrator:
 
         for scene in scenes:
 
-            print()
             print("=" * 60)
 
             print(
@@ -668,13 +767,23 @@ class ProductionOrchestrator:
                 f"{len(scene_shots)} shots"
             )
 
-        self._print_shot_preview(
-            all_shots
+        # ------------------------------------------------------------
+        # Qwen work is finished.
+        # Generate missing references only now.
+        # ------------------------------------------------------------
+
+        self._resolve_character_references(
+            characters,
+            all_shots,
         )
 
         self._validate_references(
             characters,
             all_shots,
+        )
+
+        self._print_shot_preview(
+            all_shots
         )
 
         production_plan = {
@@ -722,10 +831,6 @@ class ProductionOrchestrator:
 
         return production_plan
 
-    # ============================================================
-    # SAVE PRODUCTION PLAN
-    # ============================================================
-
     def save_production_plan(
         self,
         production_plan: dict,
@@ -750,22 +855,15 @@ class ProductionOrchestrator:
 
         print()
         print("=" * 60)
-
         print(
             "Production plan saved:"
         )
-
         print(
             output_path
         )
-
         print("=" * 60)
 
         return output_path
-
-    # ============================================================
-    # UNLOAD
-    # ============================================================
 
     def unload_models(self):
 
