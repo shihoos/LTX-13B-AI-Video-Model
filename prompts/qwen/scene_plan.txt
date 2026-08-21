@@ -27,6 +27,8 @@ Return ONLY valid JSON in exactly this format:
       "location": "",
       "time_of_day": "",
       "description": "",
+      "mood": "",
+      "lighting": "",
       "characters": [],
       "story_summary": "",
       "continuity_notes": "",
@@ -62,6 +64,27 @@ description:
 Describe the overall visual situation and environment of the scene.
 Do not describe individual camera shots.
 
+mood:
+Describe the dominant emotional and cinematic atmosphere of the scene.
+Examples:
+ominous
+mysterious
+isolated
+tense
+melancholic
+wonderous
+threatening
+
+lighting:
+Describe the scene's lighting conditions and visual character.
+Examples:
+cold blue moonlight
+dim volumetric light
+warm sunset light
+flickering torchlight
+diffuse misty light
+high-contrast directional light
+
 characters:
 List only character names present in the scene.
 
@@ -86,3 +109,5 @@ IMPORTANT:
 - Keep character names consistent with the provided character data.
 - Do not invent new major characters unless required by the story.
 - Preserve the logical order of events.
+- Keep mood and lighting consistent with the story and location.
+- Do not introduce lighting that contradicts the time of day.
