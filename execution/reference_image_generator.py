@@ -111,6 +111,51 @@ class ReferenceImageGenerator:
             "big",
         )
 
+    def check_multi_reference_execution() -> None:
+
+    source = read_text(
+        ROOT
+        / "execution"
+        / "shot_executor.py"
+    )
+
+    required = {
+        "shot.reference_images",
+        "_prepare_shot_reference",
+        "_compose_reference_images",
+        "_grid_dimensions",
+        "dynamic composite",
+        "Image.open",
+        "Image.new",
+    }
+
+    for text in required:
+
+        require(
+            text in source,
+            "shot_executor.py is missing "
+            "multi-reference execution contract:\n"
+            f"{text}",
+        )
+
+    require(
+        "[:5]"
+        not in source,
+        "shot_executor.py contains "
+        "an unintended five-reference limit.",
+    )
+
+    require(
+        "[:7]"
+        not in source,
+        "shot_executor.py contains "
+        "an unintended seven-reference limit.",
+    )
+
+    print(
+        "OK   multi-reference execution contract"
+    )
+    
     def _available_checkpoint(
         self,
     ) -> str:
