@@ -16,10 +16,11 @@ from schemas.parser import (
 class CharacterDetector:
 
     """
-    Detect important named characters from the story.
+    Detect important named characters.
 
-    Explicit character names that match a provided
-    character asset are preserved exactly.
+    Character names that already have a matching asset in
+    assets/characters/ are treated as authoritative when they
+    appear in the original user request or generated story.
     """
 
     def __init__(
@@ -39,29 +40,33 @@ class CharacterDetector:
 
     def _explicit_asset_names(
         self,
-        story: str,
+        text: str,
     ) -> list[str]:
+
+        if not text:
+
+            return []
 
         names = []
 
-        for name in (
+        for asset_name in (
             self.references.character_asset_names()
         ):
 
             pattern = (
                 r"(?<!\w)"
-                + re.escape(name)
+                + re.escape(asset_name)
                 + r"(?!\w)"
             )
 
             if re.search(
                 pattern,
-                story,
+                text,
                 flags=re.IGNORECASE,
             ):
 
                 names.append(
-                    name
+                    asset_name
                 )
 
         return names
@@ -88,7 +93,7 @@ class CharacterDetector:
                     "consistent visual identity.\n\n"
 
                     "Preserve character names exactly "
-                    "as written in the story.\n\n"
+                    "as written.\n\n"
 
                     "Do not rename, translate, expand, "
                     "or replace explicit character names.\n\n"
@@ -126,16 +131,51 @@ class CharacterDetector:
             [],
         )
 
-        cleaned_names = []
+        if not isinstance(
+            names,
+            list,
+        ):
+
+            names = []
+
+        # ------------------------------------------------------------
+        # Asset-backed names mentioned by the user or story are
+        # authoritative. This is what preserves names such as "sz"
+        # even if Qwen rewrites the story using another name.
+        # ------------------------------------------------------------
+
+        explicit_names = []
+
+        for text in (
+            original_request,
+            story,
+        ):
+
+            for name in (
+                self._explicit_asset_names(
+                    text
+                )
+            ):
+
+                key = name.lower()
+
+                if key not in {
+                    item.lower()
+                    for item
+                    in explicit_names
+                }:
+
+                    explicit_names.append(
+                        name
+                    )
+
+        result = []
         seen = set()
 
-        explicit_names = (
-            self._explicit_asset_names(
-                story
-            )
-        )
+        # ------------------------------------------------------------
+        # Add authoritative asset-backed names first.
+        # ------------------------------------------------------------
 
-        # Explicit asset-backed names always win.
         for name in explicit_names:
 
             key = name.lower()
@@ -147,13 +187,25 @@ class CharacterDetector:
                 key
             )
 
-            cleaned_names.append(
+            result.append(
                 name
             )
 
-        # Add Qwen-detected characters, but do not
-        # add a second name when an explicit asset-backed
-        # character is already present.
+        # ------------------------------------------------------------
+        # Add Qwen-detected names that are not already represented
+        # by an authoritative asset-backed name.
+        # ------------------------------------------------------------
+
+        explicit_normalized = {
+            re.sub(
+                r"[^a-z0-9]+",
+                " ",
+                name.lower(),
+            ).strip()
+            for name
+            in explicit_names
+        }
+
         for name in names:
 
             if not isinstance(
@@ -173,41 +225,28 @@ class CharacterDetector:
             if key in seen:
                 continue
 
-            # If an explicit asset name is present in the
-            # story, do not add a Qwen-generated alternative
-            # that could represent the same character.
-            if explicit_names:
+            normalized_name = re.sub(
+                r"[^a-z0-9]+",
+                " ",
+                name.lower(),
+            ).strip()
 
-                normalized_name = (
-                    re.sub(
-                        r"[^a-z0-9]+",
-                        " ",
-                        name.lower(),
-                    ).strip()
-                )
+            if (
+                normalized_name
+                in explicit_normalized
+            ):
 
-                if any(
-                    normalized_name
-                    == re.sub(
-                        r"[^a-z0-9]+",
-                        " ",
-                        explicit_name.lower(),
-                    ).strip()
-                    for explicit_name
-                    in explicit_names
-                ):
-
-                    continue
+                continue
 
             seen.add(
                 key
             )
 
-            cleaned_names.append(
+            result.append(
                 name
             )
 
-        return cleaned_names
+        return result
 
     def unload(self):
 
