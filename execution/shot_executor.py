@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import math
 import os
-from pathlib import Path
 import shutil
+from pathlib import Path
+
+from PIL import Image
 
 
 class ShotExecutor:
@@ -18,9 +21,19 @@ class ShotExecutor:
             ↓
         detailed high-resolution MP4
 
-    The raw artifact is persisted before the second stage starts.
-    Therefore a restart can reuse an existing raw clip instead of
-    regenerating it.
+    Character references:
+
+        0 references
+            → existing no-reference behavior
+
+        1 reference
+            → use the original image directly
+
+        2+ references
+            → create one dynamic composite reference image
+              containing every reference image
+
+    There is no hardcoded character/reference-count limit.
     """
 
     def __init__(
@@ -56,7 +69,6 @@ class ShotExecutor:
             exist_ok=True,
         )
 
-        # Convert both graph workflows to API prompts once.
         self.api_workflow = (
             self.workflow_adapter
             .to_api_workflow()
@@ -71,22 +83,59 @@ class ShotExecutor:
     # REFERENCE IMAGE
     # ========================================================
 
+    @staticmethod
+    def _validate_reference_paths(
+        reference_paths: list[str],
+        shot_id: str,
+    ) -> list[Path]:
+
+        paths = []
+
+        for reference_path in (
+            reference_paths
+        ):
+
+            source = Path(
+                reference_path
+            )
+
+            if not source.is_file():
+
+                raise FileNotFoundError(
+                    f"[{shot_id}] "
+                    "Reference image does not exist:\n"
+                    f"{source}"
+                )
+
+            if (
+                source.stat().st_size
+                <= 0
+            ):
+
+                raise RuntimeError(
+                    f"[{shot_id}] "
+                    "Reference image is empty:\n"
+                    f"{source}"
+                )
+
+            paths.append(
+                source
+            )
+
+        return paths
+
     def _copy_reference(
         self,
         reference_path: str,
         shot_id: str,
     ) -> str:
 
-        source = Path(
-            reference_path
+        source = (
+            self._validate_reference_paths(
+                [reference_path],
+                shot_id,
+            )[0]
         )
-
-        if not source.exists():
-
-            raise FileNotFoundError(
-                f"Reference image does not exist: "
-                f"{source}"
-            )
 
         destination = (
             self.comfy_input_dir
@@ -102,6 +151,239 @@ class ShotExecutor:
         )
 
         return destination.name
+
+    # ========================================================
+    # MULTI-REFERENCE COMPOSITION
+    # ========================================================
+
+    @staticmethod
+    def _grid_dimensions(
+        count: int,
+    ) -> tuple[int, int]:
+
+        if count <= 0:
+
+            raise ValueError(
+                "Reference count must be greater than zero."
+            )
+
+        columns = max(
+            1,
+            math.ceil(
+                math.sqrt(
+                    count * 16 / 9
+                )
+            ),
+        )
+
+        rows = math.ceil(
+            count / columns
+        )
+
+        return (
+            columns,
+            rows,
+        )
+
+    def _compose_reference_images(
+        self,
+        reference_paths: list[str],
+        shot_id: str,
+    ) -> Path:
+
+        paths = (
+            self._validate_reference_paths(
+                reference_paths,
+                shot_id,
+            )
+        )
+
+        destination = (
+            self.comfy_input_dir
+            / (
+                f"{shot_id}_"
+                "character_references.png"
+            )
+        )
+
+        if len(paths) == 1:
+
+            shutil.copy2(
+                paths[0],
+                destination,
+            )
+
+            return destination
+
+        try:
+
+            images = [
+                Image.open(
+                    path
+                ).convert(
+                    "RGB"
+                )
+                for path
+                in paths
+            ]
+
+            try:
+
+                max_width = max(
+                    image.width
+                    for image
+                    in images
+                )
+
+                max_height = max(
+                    image.height
+                    for image
+                    in images
+                )
+
+                tile_width = max_width
+                tile_height = max_height
+
+                columns, rows = (
+                    self._grid_dimensions(
+                        len(images)
+                    )
+                )
+
+                canvas_width = (
+                    columns
+                    * tile_width
+                )
+
+                canvas_height = (
+                    rows
+                    * tile_height
+                )
+
+                canvas = Image.new(
+                    "RGB",
+                    (
+                        canvas_width,
+                        canvas_height,
+                    ),
+                    "black",
+                )
+
+                for index, image in enumerate(
+                    images
+                ):
+
+                    image.thumbnail(
+                        (
+                            tile_width,
+                            tile_height,
+                        ),
+                        Image.Resampling.LANCZOS,
+                    )
+
+                    x = (
+                        (
+                            index
+                            % columns
+                        )
+                        * tile_width
+                        + (
+                            tile_width
+                            - image.width
+                        )
+                        // 2
+                    )
+
+                    y = (
+                        (
+                            index
+                            // columns
+                        )
+                        * tile_height
+                        + (
+                            tile_height
+                            - image.height
+                        )
+                        // 2
+                    )
+
+                    canvas.paste(
+                        image,
+                        (
+                            x,
+                            y,
+                        ),
+                    )
+
+                canvas.save(
+                    destination,
+                    format="PNG",
+                )
+
+            finally:
+
+                for image in images:
+
+                    image.close()
+
+        except Exception as error:
+
+            raise RuntimeError(
+                f"[{shot_id}] "
+                "Could not create the "
+                "multi-character reference "
+                "image:\n"
+                f"{error}"
+            ) from error
+
+        if (
+            not destination.is_file()
+            or
+            destination.stat().st_size <= 0
+        ):
+
+            raise RuntimeError(
+                f"[{shot_id}] "
+                "Multi-character reference "
+                "image was not created correctly."
+            )
+
+        return destination
+
+    def _prepare_shot_reference(
+        self,
+        shot,
+    ) -> str | None:
+
+        references = [
+            str(path)
+            for path
+            in (
+                shot.reference_images
+                or []
+            )
+            if str(path).strip()
+        ]
+
+        if not references:
+
+            return None
+
+        if len(references) == 1:
+
+            return self._copy_reference(
+                references[0],
+                shot.shot_id,
+            )
+
+        composite = (
+            self._compose_reference_images(
+                references,
+                shot.shot_id,
+            )
+        )
+
+        return composite.name
 
     # ========================================================
     # VIDEO INPUT FOR DETAILER
@@ -127,12 +409,6 @@ class ShotExecutor:
             )
         )
 
-        # A hard link avoids copying the entire raw video when
-        # source and destination are on the same filesystem.
-        #
-        # If hard linking is unavailable, for example because
-        # the paths are on different filesystems, fall back to
-        # a normal metadata-preserving copy.
         if not destination.exists():
 
             try:
@@ -180,18 +456,10 @@ class ShotExecutor:
             )
         )
 
-        # ----------------------------------------------------
-        # Make output name unique per shot.
-        # ----------------------------------------------------
-
         self.workflow_adapter.set_filename_prefix(
             workflow,
             f"ltx_raw/{shot.shot_id}",
         )
-
-        # ----------------------------------------------------
-        # Use the shot seed when supplied.
-        # ----------------------------------------------------
 
         if shot.seed is not None:
 
@@ -200,32 +468,36 @@ class ShotExecutor:
                 int(shot.seed),
             )
 
-        # ----------------------------------------------------
-        # Copy and bind first reference image.
-        # ----------------------------------------------------
-
-        if shot.reference_images:
-
-            reference_name = (
-                self._copy_reference(
-                    shot.reference_images[0],
-                    shot.shot_id,
-                )
+        reference_name = (
+            self._prepare_shot_reference(
+                shot
             )
+        )
+
+        if reference_name:
 
             self.workflow_adapter.set_input_image(
                 workflow,
                 reference_name,
             )
 
+            if len(
+                shot.reference_images
+                or []
+            ) > 1:
+
+                print(
+                    f"[{shot.shot_id}] "
+                    f"Using "
+                    f"{len(shot.reference_images)} "
+                    "character references "
+                    "via dynamic composite."
+                )
+
         print(
             f"[{shot.shot_id}] "
             f"GPU {gpu_id}: starting base generation"
         )
-
-        # ----------------------------------------------------
-        # Queue base workflow.
-        # ----------------------------------------------------
 
         prompt_id = (
             self.client.queue_prompt(
@@ -253,7 +525,9 @@ class ShotExecutor:
                 "no video output was found."
             )
 
-        video = video_outputs[0]
+        video = (
+            video_outputs[0]
+        )
 
         destination = (
             output_dir
@@ -330,20 +604,12 @@ class ShotExecutor:
             )
         )
 
-        # ----------------------------------------------------
-        # Seed detail generation using the same shot seed.
-        # ----------------------------------------------------
-
         if shot.seed is not None:
 
             self.detailer_workflow_adapter.set_seed(
                 workflow,
                 int(shot.seed),
             )
-
-        # ----------------------------------------------------
-        # Copy raw generated video into ComfyUI input.
-        # ----------------------------------------------------
 
         comfy_video_name = (
             self._copy_raw_to_comfy_input(
@@ -352,27 +618,10 @@ class ShotExecutor:
             )
         )
 
-        # ----------------------------------------------------
-        # Bind raw video to VHS_LoadVideo.
-        # ----------------------------------------------------
-
         self.detailer_workflow_adapter.set_input_video(
             workflow,
             comfy_video_name,
         )
-
-        # ----------------------------------------------------
-        # Detailer/upscale output.
-        # This workflow already performs:
-        #
-        # raw video
-        #    ↓
-        # IC-LoRA 0.9.8
-        #    ↓
-        # spatial upscale 2x
-        #    ↓
-        # 1536x864 master
-        # ----------------------------------------------------
 
         self.detailer_workflow_adapter.set_filename_prefix(
             workflow,
@@ -411,7 +660,9 @@ class ShotExecutor:
                 "but no video output was found."
             )
 
-        video = video_outputs[0]
+        video = (
+            video_outputs[0]
+        )
 
         destination = (
             output_dir
@@ -481,10 +732,6 @@ class ShotExecutor:
                 )
             )
 
-            # ------------------------------------------------
-            # COMPLETED SHOT
-            # ------------------------------------------------
-
             if (
                 state
                 and state.get(
@@ -512,10 +759,6 @@ class ShotExecutor:
                 return Path(
                     state["upscaled_path"]
                 )
-
-            # ------------------------------------------------
-            # RAW ARTIFACT
-            # ------------------------------------------------
 
             raw_path = None
 
@@ -553,10 +796,6 @@ class ShotExecutor:
                     )
                 )
 
-            # ------------------------------------------------
-            # DETAILER / UPSCALE
-            # ------------------------------------------------
-
             state = (
                 self.checkpoints.get_shot(
                     shot.shot_id
@@ -591,10 +830,6 @@ class ShotExecutor:
                     output_dir,
                 )
             )
-
-            # ------------------------------------------------
-            # Only now is the shot truly complete.
-            # ------------------------------------------------
 
             self.checkpoints.mark_complete(
                 shot.shot_id
