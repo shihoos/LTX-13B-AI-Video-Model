@@ -69,6 +69,7 @@ class CharacterDetector:
     def detect(
         self,
         story: str,
+        original_request: str = "",
     ) -> list[str]:
 
         messages = [
