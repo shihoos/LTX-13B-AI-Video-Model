@@ -18,8 +18,8 @@ class CharacterDetector:
     """
     Detect important named characters from the story.
 
-    Explicit character names that match a provided character
-    asset are preserved exactly.
+    Explicit character names that match a provided
+    character asset are preserved exactly.
     """
 
     def __init__(
@@ -69,7 +69,7 @@ class CharacterDetector:
     def detect(
         self,
         story: str,
-    ) -> list:
+    ) -> list[str]:
 
         messages = [
             {
@@ -120,26 +120,22 @@ class CharacterDetector:
             response
         )
 
-        names = (
-            data.get(
-                "characters",
-                [],
-            )
+        names = data.get(
+            "characters",
+            [],
         )
 
         cleaned_names = []
         seen = set()
 
-        # ------------------------------------------------------------
-        # First preserve explicit names that correspond to actual
-        # character assets already stored in the repository.
-        # ------------------------------------------------------------
-
-        for name in (
+        explicit_names = (
             self._explicit_asset_names(
                 story
             )
-        ):
+        )
+
+        # Explicit asset-backed names always win.
+        for name in explicit_names:
 
             key = name.lower()
 
@@ -154,10 +150,9 @@ class CharacterDetector:
                 name
             )
 
-        # ------------------------------------------------------------
-        # Then include Qwen-detected characters.
-        # ------------------------------------------------------------
-
+        # Add Qwen-detected characters, but do not
+        # add a second name when an explicit asset-backed
+        # character is already present.
         for name in names:
 
             if not isinstance(
@@ -176,6 +171,32 @@ class CharacterDetector:
 
             if key in seen:
                 continue
+
+            # If an explicit asset name is present in the
+            # story, do not add a Qwen-generated alternative
+            # that could represent the same character.
+            if explicit_names:
+
+                normalized_name = (
+                    re.sub(
+                        r"[^a-z0-9]+",
+                        " ",
+                        name.lower(),
+                    ).strip()
+                )
+
+                if any(
+                    normalized_name
+                    == re.sub(
+                        r"[^a-z0-9]+",
+                        " ",
+                        explicit_name.lower(),
+                    ).strip()
+                    for explicit_name
+                    in explicit_names
+                ):
+
+                    continue
 
             seen.add(
                 key
