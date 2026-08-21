@@ -12,7 +12,7 @@ from planner.config import (
     QWEN_LOCAL_PATH,
     QWEN_MODEL_ID,
     QWEN_MAX_NEW_TOKENS,
-    QWEN_TEMPERATURE,
+    QWEN_STORY_TEMPERATURE,
     QWEN_TOP_P,
 )
 
@@ -161,7 +161,7 @@ class QwenStoryModel:
             QWEN_MAX_NEW_TOKENS
         ),
         temperature: float = (
-            QWEN_TEMPERATURE
+            QWEN_STORY_TEMPERATURE
         ),
         top_p: float = (
             QWEN_TOP_P
