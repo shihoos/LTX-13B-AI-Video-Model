@@ -1,34 +1,32 @@
 from pathlib import Path
 
+from execution.character_reference_processor import (
+    CharacterReferenceProcessor,
+)
+
 
 PROJECT_ROOT = (
     Path(__file__).resolve().parents[1]
 )
 
-
 ASSETS_DIR = (
-    PROJECT_ROOT
-    / "assets"
+    PROJECT_ROOT / "assets"
 )
 
 CHARACTERS_DIR = (
-    ASSETS_DIR
-    / "characters"
+    ASSETS_DIR / "characters"
 )
 
 REFERENCES_DIR = (
-    ASSETS_DIR
-    / "references"
+    ASSETS_DIR / "references"
 )
 
 AUDIO_DIR = (
-    ASSETS_DIR
-    / "audio"
+    ASSETS_DIR / "audio"
 )
 
 MUSIC_DIR = (
-    ASSETS_DIR
-    / "music"
+    ASSETS_DIR / "music"
 )
 
 GENERATED_CHARACTERS_DIR = (
@@ -37,7 +35,6 @@ GENERATED_CHARACTERS_DIR = (
     / "characters"
     / "generated"
 )
-
 
 IMAGE_EXTENSIONS = {
     ".png",
@@ -57,6 +54,12 @@ AUDIO_EXTENSIONS = {
 class ReferenceManager:
 
     def __init__(self):
+
+        self.processor = (
+            CharacterReferenceProcessor(
+                PROJECT_ROOT
+            )
+        )
 
         self.ensure_directories()
 
@@ -89,7 +92,6 @@ class ReferenceManager:
         )
 
         if provided is not None:
-
             return provided
 
         return (
@@ -161,7 +163,6 @@ class ReferenceManager:
     ):
 
         if not directory.is_dir():
-
             return None
 
         normalized_name = (
@@ -171,19 +172,15 @@ class ReferenceManager:
             .replace(" ", "_")
         )
 
-        for file_path in (
-            directory.iterdir()
-        ):
+        for file_path in directory.iterdir():
 
             if not file_path.is_file():
-
                 continue
 
             if (
                 file_path.suffix.lower()
                 not in extensions
             ):
-
                 continue
 
             file_name = (
@@ -193,11 +190,7 @@ class ReferenceManager:
                 .replace(" ", "_")
             )
 
-            if (
-                file_name
-                == normalized_name
-            ):
-
+            if file_name == normalized_name:
                 return file_path
 
         return None
@@ -219,7 +212,6 @@ class ReferenceManager:
     ) -> list[str]:
 
         if not CHARACTERS_DIR.is_dir():
-
             return []
 
         return sorted(
@@ -232,6 +224,17 @@ class ReferenceManager:
                 file_path.suffix.lower()
                 in IMAGE_EXTENSIONS
             )
+        )
+
+    def _prepare_identity_reference(
+        self,
+        character_name: str,
+        source_path: Path,
+    ) -> Path:
+
+        return self.processor.process(
+            character_name=character_name,
+            source_path=source_path,
         )
 
     def get_character_source(
@@ -247,14 +250,21 @@ class ReferenceManager:
 
         if provided is not None:
 
+            processed = (
+                self._prepare_identity_reference(
+                    character_name,
+                    provided,
+                )
+            )
+
             return {
                 "mode": "provided",
-                "path": str(
-                    provided
-                ),
+                "path": str(processed),
+                "source_path": str(provided),
                 "message": (
-                    "Use the provided "
-                    "character reference."
+                    "Use the provided character "
+                    "reference after face-first "
+                    "identity preprocessing."
                 ),
             }
 
@@ -266,20 +276,28 @@ class ReferenceManager:
 
         if generated is not None:
 
+            processed = (
+                self._prepare_identity_reference(
+                    character_name,
+                    generated,
+                )
+            )
+
             return {
                 "mode": "generated",
-                "path": str(
-                    generated
-                ),
+                "path": str(processed),
+                "source_path": str(generated),
                 "message": (
-                    "Reuse the previously "
-                    "generated character reference."
+                    "Reuse the generated character "
+                    "reference after face-first "
+                    "identity preprocessing."
                 ),
             }
 
         return {
             "mode": "missing",
             "path": None,
+            "source_path": None,
             "message": (
                 "No character reference exists."
             ),
