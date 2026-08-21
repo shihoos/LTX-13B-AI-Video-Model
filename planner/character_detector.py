@@ -1,4 +1,8 @@
-import json
+import re
+
+from pipeline.reference_manager import (
+    ReferenceManager,
+)
 
 from planner.qwen_loader import (
     QwenStoryModel,
@@ -12,11 +16,10 @@ from schemas.parser import (
 class CharacterDetector:
 
     """
-    Detects the important named characters
-    from a completed story.
+    Detect important named characters from the story.
 
-    This removes the need for the user to manually
-    provide character_names.
+    Explicit character names that match a provided character
+    asset are preserved exactly.
     """
 
     def __init__(
@@ -29,6 +32,39 @@ class CharacterDetector:
             if model is not None
             else QwenStoryModel()
         )
+
+        self.references = (
+            ReferenceManager()
+        )
+
+    def _explicit_asset_names(
+        self,
+        story: str,
+    ) -> list[str]:
+
+        names = []
+
+        for name in (
+            self.references.character_asset_names()
+        ):
+
+            pattern = (
+                r"(?<!\w)"
+                + re.escape(name)
+                + r"(?!\w)"
+            )
+
+            if re.search(
+                pattern,
+                story,
+                flags=re.IGNORECASE,
+            ):
+
+                names.append(
+                    name
+                )
+
+        return names
 
     def detect(
         self,
@@ -49,6 +85,12 @@ class CharacterDetector:
                     "Identify the important named "
                     "characters that require a "
                     "consistent visual identity.\n\n"
+
+                    "Preserve character names exactly "
+                    "as written in the story.\n\n"
+
+                    "Do not rename, translate, expand, "
+                    "or replace explicit character names.\n\n"
 
                     "Do not include unnamed crowds, "
                     "background people, generic roles, "
@@ -88,12 +130,41 @@ class CharacterDetector:
         cleaned_names = []
         seen = set()
 
+        # ------------------------------------------------------------
+        # First preserve explicit names that correspond to actual
+        # character assets already stored in the repository.
+        # ------------------------------------------------------------
+
+        for name in (
+            self._explicit_asset_names(
+                story
+            )
+        ):
+
+            key = name.lower()
+
+            if key in seen:
+                continue
+
+            seen.add(
+                key
+            )
+
+            cleaned_names.append(
+                name
+            )
+
+        # ------------------------------------------------------------
+        # Then include Qwen-detected characters.
+        # ------------------------------------------------------------
+
         for name in names:
 
             if not isinstance(
                 name,
                 str,
             ):
+
                 continue
 
             name = name.strip()
@@ -106,7 +177,9 @@ class CharacterDetector:
             if key in seen:
                 continue
 
-            seen.add(key)
+            seen.add(
+                key
+            )
 
             cleaned_names.append(
                 name
