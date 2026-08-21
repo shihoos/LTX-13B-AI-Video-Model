@@ -2,6 +2,7 @@ from dataclasses import (
     dataclass,
     field,
 )
+
 from typing import Optional
 
 
@@ -30,7 +31,11 @@ class Character:
         default_factory=list
     )
 
-    reference_mode: str = "auto"
+    character_state: dict = field(
+        default_factory=dict
+    )
+
+    reference_mode: str = "missing"
 
     reference_path: Optional[str] = None
 
@@ -64,6 +69,9 @@ class Character:
 
             "distinctive_features":
                 self.distinctive_features,
+
+            "character_state":
+                self.character_state,
 
             "reference_mode":
                 self.reference_mode,
