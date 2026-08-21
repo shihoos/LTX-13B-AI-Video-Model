@@ -39,6 +39,8 @@ class Character:
 
     reference_path: Optional[str] = None
 
+    reference_mask_path: Optional[str] = None
+
     continuity_rules: list = field(
         default_factory=list
     )
@@ -46,6 +48,7 @@ class Character:
     def to_dict(self):
 
         return {
+
             "character_id":
                 self.character_id,
 
@@ -78,6 +81,9 @@ class Character:
 
             "reference_path":
                 self.reference_path,
+
+            "reference_mask_path":
+                self.reference_mask_path,
 
             "continuity_rules":
                 self.continuity_rules,
