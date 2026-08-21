@@ -915,10 +915,10 @@ def install_custom_nodes(
 
 def install_node_requirements():
 
-    install_requirements(
+    requirement_files = [
         COMFY
         / "requirements.txt"
-    )
+    ]
 
     for name in (
         "ComfyUI-LTXVideo",
@@ -927,11 +927,83 @@ def install_node_requirements():
         "ComfyUI-GGUF",
     ):
 
-        install_requirements(
+        requirement_files.append(
             CUSTOM
             / name
             / "requirements.txt"
         )
+
+    destination = (
+        PROJECT
+        / ".runtime_requirements_filtered.txt"
+    )
+
+    unique_lines = []
+    seen = set()
+
+    for source in requirement_files:
+
+        if not source.exists():
+            continue
+
+        for raw in source.read_text(
+            encoding="utf-8"
+        ).splitlines():
+
+            line = raw.strip()
+
+            if (
+                not line
+                or line.startswith("#")
+            ):
+                continue
+
+            normalized = (
+                line
+                .split("==", 1)[0]
+                .split(">=", 1)[0]
+                .split("<=", 1)[0]
+                .split("~=", 1)[0]
+                .split(">", 1)[0]
+                .split("<", 1)[0]
+                .strip()
+                .lower()
+            )
+
+            if normalized in FORBIDDEN_TORCH_INSTALL:
+                continue
+
+            if line in seen:
+                continue
+
+            seen.add(line)
+            unique_lines.append(line)
+
+    if not unique_lines:
+        return
+
+    destination.write_text(
+        "\n".join(unique_lines)
+        + "\n",
+        encoding="utf-8",
+    )
+
+    run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "-q",
+            "-r",
+            str(destination),
+        ]
+    )
+
+    try:
+        destination.unlink()
+    except OSError:
+        pass
 
 
 def link_one_model(
