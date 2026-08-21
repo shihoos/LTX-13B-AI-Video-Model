@@ -645,7 +645,7 @@
           "shape": 7,
           "type": "LATENT",
           "link": null
-        }
+        },
         {
           "name": "cond_image_strength",
           "shape": 7,
@@ -683,7 +683,7 @@
         "horizontal_tiles": 2,
         "vertical_tiles": 2,
         "spatial_overlap": 3,
-        "adain_factor": 0.25000000000000006
+        "adain_factor": 0.25000000000000006,
         "cond_image_strength": 1.0
       }
     },
