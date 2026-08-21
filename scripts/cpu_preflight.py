@@ -768,17 +768,29 @@ def check_planning_schema_contract() -> None:
         "lighting",
     }
 
-    for text in character_fields:
-        require(
-            text in character_schema,
-            "Character schema missing:\n"
-            f"{text}",
-        )
+        # The schema stores the complete state as one dictionary.
+    require(
+        "character_state" in character_schema,
+        "Character schema missing:\n"
+        "character_state",
+    )
+
+    # The individual state fields are defined by the Qwen
+    # planning prompt and populated by CharacterPlanner.
+    for text in (
+        "emotional_state",
+        "physical_state",
+        "clothing_state",
+        "carried_objects",
+        "injuries",
+    ):
+
         require(
             text in character_prompt,
             "Character prompt missing:\n"
             f"{text}",
         )
+
         require(
             text in character_planner,
             "Character planner missing:\n"
