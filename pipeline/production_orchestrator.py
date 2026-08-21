@@ -543,7 +543,7 @@ class ProductionOrchestrator:
 
         for shot in shots:
 
-            characters = (
+            shot_characters = (
                 getattr(
                     shot,
                     "characters",
@@ -563,7 +563,7 @@ class ProductionOrchestrator:
         
             # Environment / character-free shots do not require
             # character reference images.
-            if not characters:
+            if not shot_characters:
         
                 if reference_images:
         
