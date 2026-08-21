@@ -521,7 +521,8 @@ class ProductionOrchestrator:
         character_names = (
             self.character_detector
             .detect(
-                story=story
+                story=story,
+                original_request=user_input,
             )
         )
 
