@@ -47,6 +47,10 @@ class Shot:
     reference_images: list = field(
         default_factory=list
     )
+    
+    reference_masks: list = field(
+        default_factory=list
+    )
 
     def to_dict(self):
 
@@ -104,4 +108,7 @@ class Shot:
 
             "reference_images":
                 self.reference_images,
+            
+            "reference_masks":
+                self.reference_masks,
         }
