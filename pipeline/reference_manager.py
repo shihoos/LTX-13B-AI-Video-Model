@@ -1,25 +1,34 @@
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = (
+    Path(__file__).resolve().parents[1]
+)
 
 
-ASSETS_DIR = PROJECT_ROOT / "assets"
+ASSETS_DIR = (
+    PROJECT_ROOT
+    / "assets"
+)
 
 CHARACTERS_DIR = (
-    ASSETS_DIR / "characters"
+    ASSETS_DIR
+    / "characters"
 )
 
 REFERENCES_DIR = (
-    ASSETS_DIR / "references"
+    ASSETS_DIR
+    / "references"
 )
 
 AUDIO_DIR = (
-    ASSETS_DIR / "audio"
+    ASSETS_DIR
+    / "audio"
 )
 
 MUSIC_DIR = (
-    ASSETS_DIR / "music"
+    ASSETS_DIR
+    / "music"
 )
 
 
@@ -39,11 +48,19 @@ AUDIO_EXTENSIONS = {
 
 
 class ReferenceManager:
-    """
-    Finds optional user-provided assets.
 
-    If an asset is missing, the planner is allowed to
-    create the required description from the story.
+    """
+    Resolves character and media assets.
+
+    Character resolution policy:
+
+        assets/characters/<character-name>.*
+
+    Existing assets are always preferred.
+
+    Automatic image generation is intentionally not performed here
+    because the current repository does not contain a configured
+    still-image generation model/workflow.
     """
 
     def __init__(self):
@@ -110,6 +127,35 @@ class ReferenceManager:
             extensions=AUDIO_EXTENSIONS,
         )
 
+    def character_asset_names(self) -> list[str]:
+
+        names = []
+
+        if not CHARACTERS_DIR.exists():
+
+            return names
+
+        for file_path in sorted(
+            CHARACTERS_DIR.iterdir()
+        ):
+
+            if not file_path.is_file():
+
+                continue
+
+            if (
+                file_path.suffix.lower()
+                not in IMAGE_EXTENSIONS
+            ):
+
+                continue
+
+            names.append(
+                file_path.stem
+            )
+
+        return names
+
     def _find_file(
         self,
         directory: Path,
@@ -117,28 +163,40 @@ class ReferenceManager:
         extensions: set,
     ):
 
+        if not directory.exists():
+
+            return None
+
         normalized_name = (
-            name.lower()
+            name
+            .strip()
+            .lower()
             .replace(" ", "_")
         )
 
         for file_path in directory.iterdir():
 
             if not file_path.is_file():
+
                 continue
 
             if (
                 file_path.suffix.lower()
                 not in extensions
             ):
+
                 continue
 
             file_name = (
-                file_path.stem.lower()
+                file_path.stem
+                .lower()
                 .replace(" ", "_")
             )
 
-            if file_name == normalized_name:
+            if (
+                file_name
+                == normalized_name
+            ):
 
                 return file_path
 
@@ -161,27 +219,34 @@ class ReferenceManager:
         character_name: str,
     ) -> dict:
 
-        reference = self.find_character(
-            character_name
+        reference = (
+            self.find_character(
+                character_name
+            )
         )
 
         if reference is not None:
 
             return {
                 "mode": "provided",
-                "path": str(reference),
+                "path": str(
+                    reference
+                ),
                 "message": (
-                    "Use the provided character "
-                    "reference."
+                    "Use the provided "
+                    "character reference."
                 ),
             }
 
         return {
-            "mode": "auto",
+            "mode": "missing",
             "path": None,
             "message": (
-                "No character reference exists. "
-                "Create the character appearance "
-                "from the story."
+                "No character reference exists "
+                f"for '{character_name}'. "
+                "A still-image generation workflow "
+                "must be configured before this "
+                "character can be used with the "
+                "current I2V pipeline."
             ),
         }
