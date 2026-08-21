@@ -50,17 +50,10 @@ AUDIO_EXTENSIONS = {
 class ReferenceManager:
 
     """
-    Resolves character and media assets.
+    Resolves optional user-provided assets.
 
-    Character resolution policy:
-
-        assets/characters/<character-name>.*
-
-    Existing assets are always preferred.
-
-    Automatic image generation is intentionally not performed here
-    because the current repository does not contain a configured
-    still-image generation model/workflow.
+    Character assets are matched by filename, ignoring
+    letter case and normalizing spaces to underscores.
     """
 
     def __init__(self):
@@ -127,35 +120,6 @@ class ReferenceManager:
             extensions=AUDIO_EXTENSIONS,
         )
 
-    def character_asset_names(self) -> list[str]:
-
-        names = []
-
-        if not CHARACTERS_DIR.exists():
-
-            return names
-
-        for file_path in sorted(
-            CHARACTERS_DIR.iterdir()
-        ):
-
-            if not file_path.is_file():
-
-                continue
-
-            if (
-                file_path.suffix.lower()
-                not in IMAGE_EXTENSIONS
-            ):
-
-                continue
-
-            names.append(
-                file_path.stem
-            )
-
-        return names
-
     def _find_file(
         self,
         directory: Path,
@@ -163,34 +127,31 @@ class ReferenceManager:
         extensions: set,
     ):
 
-        if not directory.exists():
+        if not directory.is_dir():
 
             return None
 
         normalized_name = (
-            name
+            str(name)
             .strip()
             .lower()
             .replace(" ", "_")
         )
 
-        for file_path in sorted(
-        directory.iterdir()
-        ):
+        for file_path in directory.iterdir():
 
             if not file_path.is_file():
-
                 continue
 
             if (
                 file_path.suffix.lower()
                 not in extensions
             ):
-
                 continue
 
             file_name = (
                 file_path.stem
+                .strip()
                 .lower()
                 .replace(" ", "_")
             )
@@ -214,6 +175,25 @@ class ReferenceManager:
                 character_name
             )
             is not None
+        )
+
+    def character_asset_names(
+        self,
+    ) -> list[str]:
+
+        if not CHARACTERS_DIR.is_dir():
+
+            return []
+
+        return sorted(
+            file_path.stem
+            for file_path in CHARACTERS_DIR.iterdir()
+            if (
+                file_path.is_file()
+                and
+                file_path.suffix.lower()
+                in IMAGE_EXTENSIONS
+            )
         )
 
     def get_character_source(
@@ -246,9 +226,9 @@ class ReferenceManager:
             "message": (
                 "No character reference exists "
                 f"for '{character_name}'. "
-                "A still-image generation workflow "
-                "must be configured before this "
-                "character can be used with the "
-                "current I2V pipeline."
+                "The current repository does not "
+                "yet contain a still-image generation "
+                "workflow for creating the missing "
+                "reference."
             ),
         }
