@@ -15,11 +15,25 @@ class Scene:
 
     time_of_day: str = ""
 
+    weather: str = ""
+
+    atmosphere: str = ""
+
     description: str = ""
 
     mood: str = ""
 
     lighting: str = ""
+
+    environment_details: list = field(
+        default_factory=list
+    )
+
+    key_props: list = field(
+        default_factory=list
+    )
+
+    scene_objective: str = ""
 
     characters: list = field(
         default_factory=list
@@ -48,6 +62,12 @@ class Scene:
             "time_of_day":
                 self.time_of_day,
 
+            "weather":
+                self.weather,
+
+            "atmosphere":
+                self.atmosphere,
+
             "description":
                 self.description,
 
@@ -56,6 +76,15 @@ class Scene:
 
             "lighting":
                 self.lighting,
+
+            "environment_details":
+                self.environment_details,
+
+            "key_props":
+                self.key_props,
+
+            "scene_objective":
+                self.scene_objective,
 
             "characters":
                 self.characters,
