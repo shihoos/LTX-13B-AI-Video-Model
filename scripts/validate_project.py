@@ -185,6 +185,23 @@ REFERENCE_IMAGE_GENERATOR = (
     / "reference_image_generator.py"
 )
 
+CHARACTER_REFERENCE_PROCESSOR = (
+    EXECUTION_DIR
+    / "character_reference_processor.py"
+)
+
+CHARACTER_SCHEMA = (
+    PROJECT_ROOT
+    / "schemas"
+    / "character.py"
+)
+
+SHOT_SCHEMA = (
+    PROJECT_ROOT
+    / "schemas"
+    / "shot.py"
+)
+
 ADAPTER = (
     EXECUTION_DIR
     / "comfy_workflow_adapter.py"
@@ -257,6 +274,7 @@ REQUIRED_FILES = (
 
     # Execution
     "execution/__init__.py",
+    "execution/character_reference_processor.py",
     "execution/checkpoint_manager.py",
     "execution/comfy_client.py",
     "execution/comfy_workflow_adapter.py",
@@ -401,6 +419,139 @@ def parse_json(
     )
 
     return value
+
+def validate_identity_reference_contract() -> None:
+
+    processor = read_text(
+        CHARACTER_REFERENCE_PROCESSOR
+    )
+
+    character_schema = read_text(
+        CHARACTER_SCHEMA
+    )
+
+    shot_schema = read_text(
+        SHOT_SCHEMA
+    )
+
+    adapter = read_text(
+        ADAPTER
+    )
+
+    executor = read_text(
+        SHOT_EXECUTOR
+    )
+
+    manager = read_text(
+        PROJECT_ROOT
+        / "pipeline"
+        / "reference_manager.py"
+    )
+
+    planner = read_text(
+        PROJECT_ROOT
+        / "planner"
+        / "character_planner.py"
+    )
+
+    shot_planner = read_text(
+        PROJECT_ROOT
+        / "planner"
+        / "shot_planner.py"
+    )
+
+    # Processor
+
+    for text in (
+        "CharacterReferenceProcessor",
+        "identity_reference.png",
+        "identity_mask.png",
+        "mask_path",
+        "768",
+        "432",
+    ):
+
+        require(
+            text in processor,
+            "Character reference processor "
+            f"is missing contract: {text}",
+        )
+
+    # Character schema
+
+    require(
+        "reference_mask_path"
+        in character_schema,
+        "schemas/character.py must contain "
+        "reference_mask_path.",
+    )
+
+    # Shot schema
+
+    require(
+        "reference_masks"
+        in shot_schema,
+        "schemas/shot.py must contain "
+        "reference_masks.",
+    )
+
+    # Reference manager
+
+    require(
+        "mask_path"
+        in manager,
+        "ReferenceManager must propagate "
+        "identity mask paths.",
+    )
+
+    # Character planner
+
+    require(
+        "reference_mask_path"
+        in planner,
+        "CharacterPlanner must propagate "
+        "reference_mask_path.",
+    )
+
+    # Shot planner
+
+    require(
+        "reference_masks"
+        in shot_planner,
+        "ShotPlanner must propagate "
+        "reference_masks.",
+    )
+
+    # Adapter
+
+    for text in (
+        "set_identity_reference_image",
+        "set_identity_mask_image",
+    ):
+
+        require(
+            text in adapter,
+            "Workflow adapter missing "
+            f"{text}.",
+        )
+
+    # Executor
+
+    for text in (
+        "reference_masks",
+        "_copy_reference_mask",
+        "_compose_reference_masks",
+    ):
+
+        require(
+            text in executor,
+            "ShotExecutor missing "
+            f"{text}.",
+        )
+
+    print(
+        "OK   identity reference contract"
+    )
 
 
 # ============================================================================
@@ -2549,6 +2700,8 @@ def main() -> None:
     validate_reference_image_generator()
 
     validate_multi_reference_execution()
+
+    validate_identity_reference_contract()
 
     # =========================================================================
     # LIVE RUNTIME
