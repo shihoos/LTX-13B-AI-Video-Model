@@ -174,7 +174,9 @@ class ReferenceManager:
             .replace(" ", "_")
         )
 
-        for file_path in directory.iterdir():
+        for file_path in sorted(
+        directory.iterdir()
+        ):
 
             if not file_path.is_file():
 
