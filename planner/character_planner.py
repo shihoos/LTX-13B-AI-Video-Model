@@ -229,6 +229,12 @@ class CharacterPlanner:
                         )
                     ),
 
+                    reference_mask_path=(
+                         reference.get(
+                             "mask_path"
+                         )
+                    ),
+
                     continuity_rules=item.get(
                         "continuity_rules",
                         [],
