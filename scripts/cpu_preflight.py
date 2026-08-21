@@ -1611,6 +1611,7 @@ def main() -> None:
     check_adapter()
     check_real_detailer_conversion()
     check_reference_image_generator()
+    check_multi_reference_execution()
     check_compatibility_builder()
     check_generate_video()
     check_kaggle_wiring()
