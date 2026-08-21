@@ -623,20 +623,20 @@
         432,
         97,
         "0",
-        0.8,
+        0.72,
         "disabled",
         30,
-        1
+        0
       ],
       "widgets_values_named": {
         "width": 768,
         "height": 432,
         "num_frames": 97,
         "optional_cond_indices": "0",
-        "strength": 0.8,
+        "strength": 0.72,
         "crop": "disabled",
         "crf": 30,
-        "blur": 1
+        "blur": 0
       }
     },
     {
