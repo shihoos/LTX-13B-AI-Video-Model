@@ -152,6 +152,91 @@ class ShotPlanner:
 
         return images
 
+    def _character_reference_mask_map(
+        self,
+        characters: list,
+    ) -> dict:
+
+        references = {}
+
+        for character in characters:
+
+            if hasattr(
+                character,
+                "name",
+            ):
+
+                name = character.name
+
+                mask_path = getattr(
+                    character,
+                    "reference_mask_path",
+                    None,
+                )
+
+            elif isinstance(
+                character,
+                dict,
+            ):
+
+                name = character.get(
+                    "name",
+                    "",
+                )
+
+                mask_path = character.get(
+                    "reference_mask_path"
+                )
+
+            else:
+
+                continue
+
+            if (
+                name
+                and mask_path
+            ):
+
+                references[
+                    name.lower()
+                ] = str(
+                    mask_path
+                )
+
+        return references
+
+    def _reference_masks_for_shot(
+        self,
+        shot_characters: list,
+        reference_map: dict,
+    ) -> list:
+
+        masks = []
+
+        for name in shot_characters:
+
+            if not isinstance(
+                name,
+                str,
+            ):
+
+                continue
+
+            path = reference_map.get(
+                name.lower()
+            )
+
+            if (
+                path
+                and path not in masks
+            ):
+
+                masks.append(
+                    path
+                )
+
+        return masks
+
     def create_shot_plan(
         self,
         story: str,
@@ -249,6 +334,12 @@ class ShotPlanner:
 
         reference_map = (
             self._character_reference_map(
+                characters
+            )
+        )
+
+        reference_mask_map = (
+            self._character_reference_mask_map(
                 characters
             )
         )
@@ -357,6 +448,14 @@ class ShotPlanner:
                         shot_characters,
                         reference_map,
                     )
+                ),
+
+                reference_masks=(
+                    self
+                    ._reference_masks_for_shot(
+                        shot_characters,
+                        reference_mask_map,
+                     )
                 ),
             )
 
