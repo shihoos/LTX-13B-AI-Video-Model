@@ -797,22 +797,37 @@ def check_planning_schema_contract() -> None:
             f"{text}",
         )
 
-    for text in scene_fields:
+    # The Character schema stores the complete state
+    # as one character_state dictionary.
+    require(
+        "character_state" in character_schema,
+        "Character schema missing:\n"
+        "character_state",
+    )
+
+    # The Qwen character prompt defines the individual
+    # fields contained inside character_state.
+    for text in (
+        "emotional_state",
+        "physical_state",
+        "clothing_state",
+        "carried_objects",
+        "injuries",
+    ):
+
         require(
-            text in scene_schema,
-            "Scene schema missing:\n"
+            text in character_prompt,
+            "Character prompt missing:\n"
             f"{text}",
         )
-        require(
-            text in scene_prompt,
-            "Scene prompt missing:\n"
-            f"{text}",
-        )
-        require(
-            text in scene_planner,
-            "Scene planner missing:\n"
-            f"{text}",
-        )
+
+    # CharacterPlanner must pass the complete
+    # character_state object into Character.
+    require(
+        "character_state" in character_planner,
+        "Character planner missing:\n"
+        "character_state",
+    )
 
     print(
         "OK   character/scene planning contract"
