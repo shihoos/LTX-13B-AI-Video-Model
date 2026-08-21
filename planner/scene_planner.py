@@ -2,6 +2,10 @@ import json
 
 from pathlib import Path
 
+from planner.config import (
+    QWEN_SCENE_PLAN_TEMPERATURE,
+)
+
 from planner.qwen_loader import (
     QwenStoryModel,
 )
@@ -122,7 +126,10 @@ class ScenePlanner:
         ]
 
         response = self.model.generate(
-            messages
+            messages,
+            temperature=(
+                QWEN_SCENE_PLAN_TEMPERATURE
+            ),
         )
 
         data = extract_json(
@@ -157,6 +164,16 @@ class ScenePlanner:
                         "",
                     ),
 
+                    weather=item.get(
+                        "weather",
+                        "",
+                    ),
+
+                    atmosphere=item.get(
+                        "atmosphere",
+                        "",
+                    ),
+
                     description=item.get(
                         "description",
                         "",
@@ -169,6 +186,21 @@ class ScenePlanner:
 
                     lighting=item.get(
                         "lighting",
+                        "",
+                    ),
+
+                    environment_details=item.get(
+                        "environment_details",
+                        [],
+                    ),
+
+                    key_props=item.get(
+                        "key_props",
+                        [],
+                    ),
+
+                    scene_objective=item.get(
+                        "scene_objective",
                         "",
                     ),
 
