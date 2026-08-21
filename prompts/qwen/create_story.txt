@@ -21,6 +21,21 @@ The story should maintain logical continuity.
 
 Do not create random scenes that do not contribute to the narrative.
 
+IMPORTANT CHARACTER-NAME RULE:
+
+If the user's request explicitly names a character, preserve that character name exactly.
+
+Do not:
+
+- rename the character
+- translate the character name
+- replace the character with another name
+- invent a different name for the same explicitly named character
+
+An explicit character name is authoritative for the entire production pipeline.
+
+If the user uses a character name that corresponds to an existing character asset, preserve that exact name.
+
 USER REQUEST:
 
 {user_request}
