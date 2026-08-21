@@ -24,17 +24,19 @@ from planner.config import (
 class ReferenceImageGenerator:
 
     """
-    Generates one persistent reference image for a character
-    when no user-provided character asset exists.
+    Generates one persistent reference image for a character.
 
-    Generated references are stored permanently under:
+    Existing user-provided references are handled before this
+    class is called.
+
+    Generated files are stored under:
 
         data/characters/generated/
     """
 
     def __init__(
         self,
-        client: ComfyClient | None = None,
+        client=None,
     ):
 
         if client is None:
@@ -54,36 +56,28 @@ class ReferenceImageGenerator:
             exist_ok=True,
         )
 
-    # ============================================================
-    # FILE NAME
-    # ============================================================
-
     @staticmethod
     def _normalize_name(
         name: str,
     ) -> str:
 
-        value = re.sub(
+        normalized = re.sub(
             r"[^a-zA-Z0-9]+",
             "_",
             name.strip().lower(),
         )
 
-        value = value.strip(
+        normalized = normalized.strip(
             "_"
         )
 
-        if not value:
+        if not normalized:
 
             raise ValueError(
                 "Character name cannot be empty."
             )
 
-        return value
-
-    # ============================================================
-    # OUTPUT PATH
-    # ============================================================
+        return normalized
 
     def output_path(
         self,
@@ -97,10 +91,6 @@ class ReferenceImageGenerator:
                 ".png"
             )
         )
-
-    # ============================================================
-    # SEED
-    # ============================================================
 
     @staticmethod
     def _stable_seed(
@@ -120,10 +110,6 @@ class ReferenceImageGenerator:
             digest[:4],
             "big",
         )
-
-    # ============================================================
-    # CHECKPOINT
-    # ============================================================
 
     def _available_checkpoint(
         self,
@@ -146,9 +132,9 @@ class ReferenceImageGenerator:
             raise RuntimeError(
                 "ComfyUI does not provide "
                 "CheckpointLoaderSimple. "
-                "A normal still-image checkpoint "
-                "is required to generate a missing "
-                "character reference."
+                "A still-image checkpoint is "
+                "required for automatic character "
+                "reference generation."
             )
 
         inputs = loader.get(
@@ -174,8 +160,9 @@ class ReferenceImageGenerator:
         ):
 
             raise RuntimeError(
-                "ComfyUI did not expose any "
-                "CheckpointLoaderSimple checkpoints."
+                "No CheckpointLoaderSimple "
+                "checkpoint choices were exposed "
+                "by ComfyUI."
             )
 
         choices = checkpoint_spec[0]
@@ -207,8 +194,6 @@ class ReferenceImageGenerator:
                 REFERENCE_IMAGE_CHECKPOINT
             )
 
-        preferred = []
-
         for checkpoint in choices:
 
             name = str(
@@ -224,23 +209,13 @@ class ReferenceImageGenerator:
                 in name
             ):
 
-                preferred.append(
+                return str(
                     checkpoint
                 )
-
-        if preferred:
-
-            return str(
-                preferred[0]
-            )
 
         return str(
             choices[0]
         )
-
-    # ============================================================
-    # WORKFLOW
-    # ============================================================
 
     def _build_workflow(
         self,
@@ -250,49 +225,51 @@ class ReferenceImageGenerator:
         appearance: dict,
         clothing: dict,
         distinctive_features: list,
+        character_state: dict,
     ) -> dict:
 
         checkpoint = (
             self._available_checkpoint()
         )
 
-        appearance_text = (
-            ", ".join(
-                f"{key}: {value}"
-                for key, value
-                in appearance.items()
-            )
+        appearance_text = ", ".join(
+            f"{key}: {value}"
+            for key, value
+            in appearance.items()
         )
 
-        clothing_text = (
-            ", ".join(
-                f"{key}: {value}"
-                for key, value
-                in clothing.items()
-            )
+        clothing_text = ", ".join(
+            f"{key}: {value}"
+            for key, value
+            in clothing.items()
         )
 
-        features_text = (
-            ", ".join(
-                str(item)
-                for item
-                in distinctive_features
-            )
+        features_text = ", ".join(
+            str(item)
+            for item
+            in distinctive_features
+        )
+
+        state_text = ", ".join(
+            f"{key}: {value}"
+            for key, value
+            in character_state.items()
         )
 
         positive = (
-            "cinematic character reference portrait, "
+            "cinematic character reference, "
             "single person, full body, "
             "clear face, realistic human proportions, "
-            "consistent identity, "
-            f"character named {character_name}, "
+            "stable visual identity, "
+            f"character name: {character_name}, "
             f"description: {description}, "
             f"personality: {personality}, "
             f"appearance: {appearance_text}, "
             f"clothing: {clothing_text}, "
             f"distinctive features: {features_text}, "
-            "neutral simple background, "
-            "clean separated silhouette, "
+            f"current state: {state_text}, "
+            "neutral uncluttered background, "
+            "clean silhouette, "
             "realistic materials, "
             "high detail, "
             "natural lighting"
@@ -327,7 +304,6 @@ class ReferenceImageGenerator:
             "1": {
                 "class_type":
                     "CheckpointLoaderSimple",
-
                 "inputs": {
                     "ckpt_name":
                         checkpoint,
@@ -337,11 +313,9 @@ class ReferenceImageGenerator:
             "2": {
                 "class_type":
                     "CLIPTextEncode",
-
                 "inputs": {
                     "text":
                         positive,
-
                     "clip": [
                         "1",
                         1,
@@ -352,11 +326,9 @@ class ReferenceImageGenerator:
             "3": {
                 "class_type":
                     "CLIPTextEncode",
-
                 "inputs": {
                     "text":
                         negative,
-
                     "clip": [
                         "1",
                         1,
@@ -367,14 +339,11 @@ class ReferenceImageGenerator:
             "4": {
                 "class_type":
                     "EmptyLatentImage",
-
                 "inputs": {
                     "width":
                         REFERENCE_IMAGE_WIDTH,
-
                     "height":
                         REFERENCE_IMAGE_HEIGHT,
-
                     "batch_size":
                         1,
                 },
@@ -383,41 +352,31 @@ class ReferenceImageGenerator:
             "5": {
                 "class_type":
                     "KSampler",
-
                 "inputs": {
                     "seed":
                         seed,
-
                     "steps":
                         REFERENCE_IMAGE_STEPS,
-
                     "cfg":
                         REFERENCE_IMAGE_CFG,
-
                     "sampler_name":
                         "euler",
-
                     "scheduler":
                         "normal",
-
                     "denoise":
                         1.0,
-
                     "model": [
                         "1",
                         0,
                     ],
-
                     "positive": [
                         "2",
                         0,
                     ],
-
                     "negative": [
                         "3",
                         0,
                     ],
-
                     "latent_image": [
                         "4",
                         0,
@@ -428,13 +387,11 @@ class ReferenceImageGenerator:
             "6": {
                 "class_type":
                     "VAEDecode",
-
                 "inputs": {
                     "samples": [
                         "5",
                         0,
                     ],
-
                     "vae": [
                         "1",
                         2,
@@ -445,11 +402,9 @@ class ReferenceImageGenerator:
             "7": {
                 "class_type":
                     "SaveImage",
-
                 "inputs": {
                     "filename_prefix":
                         prefix,
-
                     "images": [
                         "6",
                         0,
@@ -457,10 +412,6 @@ class ReferenceImageGenerator:
                 },
             },
         }
-
-    # ============================================================
-    # GENERATE
-    # ============================================================
 
     def generate(
         self,
@@ -470,6 +421,7 @@ class ReferenceImageGenerator:
         appearance: dict,
         clothing: dict,
         distinctive_features: list,
+        character_state: dict,
     ) -> Path:
 
         destination = self.output_path(
@@ -478,7 +430,8 @@ class ReferenceImageGenerator:
 
         if (
             destination.is_file()
-            and destination.stat().st_size > 0
+            and
+            destination.stat().st_size > 0
         ):
 
             return destination
@@ -499,6 +452,9 @@ class ReferenceImageGenerator:
             clothing=clothing,
             distinctive_features=(
                 distinctive_features
+            ),
+            character_state=(
+                character_state
             ),
         )
 
@@ -523,9 +479,9 @@ class ReferenceImageGenerator:
         if not image_outputs:
 
             raise RuntimeError(
-                "Reference-image workflow "
-                "completed without a PNG output "
-                f"for character '{character_name}'."
+                "Reference-image generation "
+                "completed without an image output "
+                f"for '{character_name}'."
             )
 
         image = (
@@ -547,7 +503,8 @@ class ReferenceImageGenerator:
 
         if (
             not destination.is_file()
-            or destination.stat().st_size <= 0
+            or
+            destination.stat().st_size <= 0
         ):
 
             raise RuntimeError(
