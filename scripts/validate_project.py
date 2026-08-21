@@ -250,6 +250,7 @@ REQUIRED_FILES = (
     "execution/checkpoint_manager.py",
     "execution/comfy_client.py",
     "execution/comfy_workflow_adapter.py",
+    "execution/reference_image_generator.py",
     "execution/shot_executor.py",
     "execution/assembly_manager.py",
     "execution/production_runner.py",
