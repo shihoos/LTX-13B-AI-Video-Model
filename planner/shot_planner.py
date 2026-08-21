@@ -2,6 +2,10 @@ import json
 
 from pathlib import Path
 
+from planner.config import (
+    QWEN_SHOT_PLAN_TEMPERATURE,
+)
+
 from planner.qwen_loader import (
     QwenStoryModel,
 )
@@ -233,7 +237,10 @@ class ShotPlanner:
         ]
 
         response = self.model.generate(
-            messages
+            messages,
+            temperature=(
+                QWEN_SHOT_PLAN_TEMPERATURE
+            ),
         )
 
         data = extract_json(
