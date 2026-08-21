@@ -4,6 +4,7 @@ from planner.config import (
     AI_STORY_MODE,
     EXPAND_USER_STORY_MODE,
     PRESERVE_USER_STORY_MODE,
+    QWEN_STORY_TEMPERATURE,
 )
 
 from planner.qwen_loader import (
@@ -97,7 +98,10 @@ class StoryPlanner:
         ]
 
         return self.model.generate(
-            messages
+            messages,
+            temperature=(
+                QWEN_STORY_TEMPERATURE
+            ),
         )
 
     def preserve_story(
