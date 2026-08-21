@@ -175,6 +175,11 @@ VALIDATOR = (
     / "validate_project.py"
 )
 
+SHOT_EXECUTOR = (
+    EXECUTION_DIR
+    / "shot_executor.py"
+)
+
 REFERENCE_IMAGE_GENERATOR = (
     EXECUTION_DIR
     / "reference_image_generator.py"
@@ -2127,6 +2132,49 @@ def validate_reference_image_generator() -> None:
         "OK   character reference generator contract"
     )
 
+def validate_multi_reference_execution() -> None:
+
+    source = read_text(
+        SHOT_EXECUTOR
+    )
+
+    required = {
+        "shot.reference_images",
+        "_prepare_shot_reference",
+        "_compose_reference_images",
+        "_grid_dimensions",
+        "dynamic composite",
+        "Image.open",
+        "Image.new",
+    }
+
+    for text in required:
+
+        require(
+            text in source,
+            "shot_executor.py is missing "
+            "multi-reference execution contract:\n"
+            f"{text}",
+        )
+
+    require(
+        "[:5]"
+        not in source,
+        "shot_executor.py contains "
+        "an unintended five-reference limit.",
+    )
+
+    require(
+        "[:7]"
+        not in source,
+        "shot_executor.py contains "
+        "an unintended seven-reference limit.",
+    )
+
+    print(
+        "OK   multi-reference execution contract"
+    )
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -2249,6 +2297,8 @@ def main() -> None:
     validate_live_verifier_matches_runtime_contract()
 
     validate_reference_image_generator()
+
+    validate_multi_reference_execution()
 
     # =========================================================================
     # LIVE RUNTIME
