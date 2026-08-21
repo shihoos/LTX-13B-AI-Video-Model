@@ -175,6 +175,11 @@ VALIDATOR = (
     / "validate_project.py"
 )
 
+REFERENCE_IMAGE_GENERATOR = (
+    EXECUTION_DIR
+    / "reference_image_generator.py"
+)
+
 ADAPTER = (
     EXECUTION_DIR
     / "comfy_workflow_adapter.py"
@@ -2094,6 +2099,34 @@ def validate_live_verifier_matches_runtime_contract() -> None:
     )
 
 
+def validate_reference_image_generator() -> None:
+
+    source = read_text(
+        REFERENCE_IMAGE_GENERATOR
+    )
+
+    required = {
+        "ReferenceImageGenerator",
+        "CheckpointLoaderSimple",
+        "SaveImage",
+        "data/characters/generated",
+        "get_object_info",
+        "find_image_outputs",
+    }
+
+    for text in required:
+
+        require(
+            text in source,
+            "reference_image_generator.py "
+            "missing contract:\n"
+            f"{text}",
+        )
+
+    print(
+        "OK   character reference generator contract"
+    )
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -2214,6 +2247,8 @@ def main() -> None:
     validate_port_contract()
 
     validate_live_verifier_matches_runtime_contract()
+
+    validate_reference_image_generator()
 
     # =========================================================================
     # LIVE RUNTIME
