@@ -2,12 +2,8 @@ import json
 
 from pathlib import Path
 
-from execution.comfy_client import (
-    ComfyClient,
-)
-
-from execution.reference_image_generator import (
-    ReferenceImageGenerator,
+from planner.config import (
+    QWEN_CHARACTER_PLAN_TEMPERATURE,
 )
 
 from planner.qwen_loader import (
@@ -32,7 +28,6 @@ class CharacterPlanner:
     def __init__(
         self,
         model=None,
-        reference_generator=None,
     ):
 
         self.model = (
@@ -43,22 +38,6 @@ class CharacterPlanner:
 
         self.references = (
             ReferenceManager()
-        )
-
-        if reference_generator is None:
-
-            reference_generator = (
-                ReferenceImageGenerator(
-                    client=ComfyClient(
-                        base_url=(
-                            "http://127.0.0.1:8188"
-                        )
-                    )
-                )
-            )
-
-        self.reference_generator = (
-            reference_generator
         )
 
     def _read_prompt(self) -> str:
@@ -144,7 +123,10 @@ class CharacterPlanner:
         ]
 
         response = self.model.generate(
-            messages
+            messages,
+            temperature=(
+                QWEN_CHARACTER_PLAN_TEMPERATURE
+            ),
         )
 
         data = extract_json(
@@ -190,72 +172,6 @@ class CharacterPlanner:
                     )
                 )
 
-            description = item.get(
-                "description",
-                "",
-            )
-
-            personality = item.get(
-                "personality",
-                "",
-            )
-
-            appearance = item.get(
-                "appearance",
-                {},
-            )
-
-            clothing = item.get(
-                "clothing",
-                {},
-            )
-
-            distinctive_features = (
-                item.get(
-                    "distinctive_features",
-                    [],
-                )
-            )
-
-            if (
-                reference.get("mode")
-                == "missing"
-            ):
-
-                generated_path = (
-                    self.reference_generator
-                    .generate(
-                        character_name=name,
-                        description=(
-                            description
-                        ),
-                        personality=(
-                            personality
-                        ),
-                        appearance=(
-                            appearance
-                        ),
-                        clothing=(
-                            clothing
-                        ),
-                        distinctive_features=(
-                            distinctive_features
-                        ),
-                    )
-                )
-
-                reference = {
-                    "mode": "generated",
-                    "path": str(
-                        generated_path
-                    ),
-                    "message": (
-                        "Generated and stored "
-                        "a persistent character "
-                        "reference."
-                    ),
-                }
-
             characters.append(
                 Character(
                     character_id=(
@@ -270,24 +186,34 @@ class CharacterPlanner:
                         "",
                     ),
 
-                    description=(
-                        description
+                    description=item.get(
+                        "description",
+                        "",
                     ),
 
-                    personality=(
-                        personality
+                    personality=item.get(
+                        "personality",
+                        "",
                     ),
 
-                    appearance=(
-                        appearance
+                    appearance=item.get(
+                        "appearance",
+                        {},
                     ),
 
-                    clothing=(
-                        clothing
+                    clothing=item.get(
+                        "clothing",
+                        {},
                     ),
 
-                    distinctive_features=(
-                        distinctive_features
+                    distinctive_features=item.get(
+                        "distinctive_features",
+                        [],
+                    ),
+
+                    character_state=item.get(
+                        "character_state",
+                        {},
                     ),
 
                     reference_mode=(
