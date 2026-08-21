@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import os
+
 from pathlib import Path
 
 
@@ -29,7 +33,15 @@ QWEN_LOCAL_PATH = (
 
 QWEN_MAX_NEW_TOKENS = 4096
 
-QWEN_TEMPERATURE = 0.7
+QWEN_STORY_TEMPERATURE = 0.7
+
+QWEN_CHARACTER_DETECTION_TEMPERATURE = 0.1
+
+QWEN_CHARACTER_PLAN_TEMPERATURE = 0.25
+
+QWEN_SCENE_PLAN_TEMPERATURE = 0.25
+
+QWEN_SHOT_PLAN_TEMPERATURE = 0.3
 
 QWEN_TOP_P = 0.8
 
@@ -116,17 +128,28 @@ PRODUCTION_DIR = (
 
 
 # ============================================================
-# REFERENCE IMAGE RUNTIME
+# GENERATED CHARACTER REFERENCE RUNTIME
 # ============================================================
 
 REFERENCE_IMAGE_HOST = (
-    "127.0.0.1"
+    os.getenv(
+        "LTX_REFERENCE_IMAGE_HOST",
+        "127.0.0.1",
+    )
 )
 
-REFERENCE_IMAGE_PORT = 8188
+REFERENCE_IMAGE_PORT = int(
+    os.getenv(
+        "LTX_REFERENCE_IMAGE_PORT",
+        "8188",
+    )
+)
 
 REFERENCE_IMAGE_CHECKPOINT = (
-    ""
+    os.getenv(
+        "LTX_REFERENCE_IMAGE_CHECKPOINT",
+        "",
+    ).strip()
 )
 
 REFERENCE_IMAGE_WIDTH = 768
@@ -161,6 +184,10 @@ VALID_STORY_MODES = {
     EXPAND_USER_STORY_MODE,
 }
 
+
+# ============================================================
+# DIRECTORIES
+# ============================================================
 
 def ensure_directories():
 
