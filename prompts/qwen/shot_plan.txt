@@ -2,8 +2,7 @@ You are creating a detailed cinematic shot plan.
 
 Convert the provided scene into an ordered sequence of video shots.
 
-Each shot must be independently understandable and suitable for
-generation by an AI video model.
+Each shot must be independently understandable and suitable for generation by an AI video model.
 
 STORY:
 
@@ -58,11 +57,19 @@ RULES:
 - Use the provided scene_id.
 - Use only characters present in the scene unless absolutely necessary.
 - Keep character appearance consistent with the provided character data.
+- Respect character_state.
+- Preserve clothing_state, carried_objects, injuries, and physical_state.
+- Respect scene weather.
+- Respect scene atmosphere.
+- Preserve important environment_details.
+- Preserve key_props when relevant.
+- Respect the scene objective.
 - Respect the previous continuity context.
 - visual_prompt must describe only the visual content needed for that shot.
 - negative_prompt should contain unwanted visual artifacts or qualities.
 - Do not create actual image files.
 - Do not invent reference image paths.
-- reference_images must initially be an empty list [].
+- reference_images must initially be [].
 - previous_shot and next_shot will be linked later.
 - seed must initially be null.
+- Keep lighting and mood visually consistent with the scene.
