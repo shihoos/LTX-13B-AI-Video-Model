@@ -5,13 +5,16 @@ import time
 import uuid
 
 from pathlib import Path
+
 from urllib.error import (
     HTTPError,
     URLError,
 )
+
 from urllib.parse import (
     urlencode,
 )
+
 from urllib.request import (
     Request,
     urlopen,
@@ -252,6 +255,32 @@ class ComfyClient:
         except Exception:
 
             return False
+
+    # ========================================================================
+    # OBJECT INFO
+    # ========================================================================
+
+    def get_object_info(
+        self,
+    ) -> dict:
+
+        result = self._request(
+            "GET",
+            "/object_info",
+            retry=True,
+        )
+
+        if not isinstance(
+            result,
+            dict,
+        ):
+
+            raise RuntimeError(
+                "ComfyUI returned an invalid "
+                "/object_info response."
+            )
+
+        return result
 
     # ========================================================================
     # QUEUE PROMPT
@@ -587,5 +616,110 @@ class ComfyClient:
                                 ),
                             }
                         )
+
+        return results
+
+    # ========================================================================
+    # FIND IMAGE OUTPUTS
+    # ========================================================================
+
+    @staticmethod
+    def find_image_outputs(
+        history: dict,
+    ) -> list:
+
+        results = []
+
+        outputs = (
+            history.get(
+                "outputs",
+                {},
+            )
+        )
+
+        if not isinstance(
+            outputs,
+            dict,
+        ):
+
+            return results
+
+        for node_output in (
+            outputs.values()
+        ):
+
+            if not isinstance(
+                node_output,
+                dict,
+            ):
+
+                continue
+
+            for value in (
+                node_output.values()
+            ):
+
+                if not isinstance(
+                    value,
+                    list,
+                ):
+
+                    continue
+
+                for item in value:
+
+                    if not isinstance(
+                        item,
+                        dict,
+                    ):
+
+                        continue
+
+                    filename = (
+                        item.get(
+                            "filename"
+                        )
+                    )
+
+                    if not filename:
+
+                        continue
+
+                    extension = (
+                        Path(
+                            filename
+                        )
+                        .suffix
+                        .lower()
+                    )
+
+                    if extension not in {
+                        ".png",
+                        ".jpg",
+                        ".jpeg",
+                        ".webp",
+                    }:
+
+                        continue
+
+                    results.append(
+                        {
+                            "filename": (
+                                filename
+                            ),
+                            "subfolder": (
+                                item.get(
+                                    "subfolder",
+                                    "",
+                                )
+                            ),
+                            "type": (
+                                item.get(
+                                    "type",
+                                    "output",
+                                )
+                            ),
+                        }
+                    )
 
         return results
