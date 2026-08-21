@@ -543,29 +543,67 @@ class ProductionOrchestrator:
 
         for shot in shots:
 
-            if not shot.reference_images:
-
+            characters = (
+                getattr(
+                    shot,
+                    "characters",
+                    []
+                )
+                or []
+            )
+        
+            reference_images = (
+                getattr(
+                    shot,
+                    "reference_images",
+                    []
+                )
+                or []
+            )
+        
+            # Environment / character-free shots do not require
+            # character reference images.
+            if not characters:
+        
+                if reference_images:
+        
+                    for image_path in reference_images:
+        
+                        if not Path(
+                            image_path
+                        ).is_file():
+        
+                            missing.append(
+                                (
+                                    shot.shot_id,
+                                    str(image_path),
+                                )
+                            )
+        
+                continue
+        
+            # Character-containing shots must have references.
+            if not reference_images:
+        
                 missing.append(
                     (
                         shot.shot_id,
                         "NO_REFERENCE_IMAGE",
                     )
                 )
-
+        
                 continue
-
-            for image_path in (
-                shot.reference_images
-            ):
-
+        
+            for image_path in reference_images:
+        
                 if not Path(
                     image_path
                 ).is_file():
-
+        
                     missing.append(
                         (
                             shot.shot_id,
-                            str(image_path),
+                            str(image_path)
                         )
                     )
 
