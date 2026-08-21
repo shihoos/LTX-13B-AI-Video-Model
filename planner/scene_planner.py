@@ -162,6 +162,16 @@ class ScenePlanner:
                         "",
                     ),
 
+                    mood=item.get(
+                        "mood",
+                        "",
+                    ),
+
+                    lighting=item.get(
+                        "lighting",
+                        "",
+                    ),
+
                     characters=item.get(
                         "characters",
                         [],
