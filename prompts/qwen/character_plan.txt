@@ -1,5 +1,4 @@
-You are creating structured character production data for a cinematic
-AI video pipeline.
+You are creating structured character production data for a cinematic AI video pipeline.
 
 Analyze the story and create production-ready character definitions.
 
@@ -37,7 +36,14 @@ Use exactly this structure:
         "important_items": []
       },
       "distinctive_features": [],
-      "reference_mode": "auto",
+      "character_state": {
+        "emotional_state": "",
+        "physical_state": "",
+        "clothing_state": "",
+        "carried_objects": [],
+        "injuries": []
+      },
+      "reference_mode": "missing",
       "reference_path": null,
       "continuity_rules": []
     }
@@ -50,29 +56,59 @@ RULES:
 - Do not use Markdown.
 - Do not wrap the response in code fences.
 - Do not include explanations.
+- Preserve explicit character names exactly.
 - Keep character names consistent with the story.
 - Use the provided reference information.
+- Do not invent a replacement identity for a provided reference.
 
 REFERENCE RULES:
 
 If reference mode is "provided":
+
 - Keep "reference_mode" as "provided".
 - Preserve the exact provided "reference_path".
 - Do not replace the visual identity from the reference.
 - Use the reference as the primary identity source.
 
-If reference mode is "auto":
-- Keep "reference_mode" as "auto".
+If reference mode is "generated":
+
+- Keep "reference_mode" as "generated".
+- Preserve the generated reference identity.
+- Do not create a different visual identity.
+
+If reference mode is "missing":
+
+- Keep "reference_mode" as "missing".
 - Keep "reference_path" as null.
-- Create the appearance from the story.
+- The production pipeline will generate one canonical reference image later.
+
+CHARACTER STATE:
+
+emotional_state:
+Describe the current emotional condition at the beginning of the story.
+
+physical_state:
+Describe the current physical condition.
+
+clothing_state:
+Describe the exact current clothing state that must remain consistent.
+
+carried_objects:
+List important objects currently carried.
+
+injuries:
+List current injuries. Return [] when there are none.
 
 CONTINUITY RULES:
 
-Include details that must remain visually consistent across scenes,
-such as:
+Include details that must remain visually consistent across scenes, such as:
+
 - hairstyle
 - facial features
 - clothing
 - accessories
 - body characteristics
-- important objects carried by the character
+- important objects carried
+- emotional state
+- physical condition
+- injuries
