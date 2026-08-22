@@ -1,40 +1,44 @@
 Create a complete cinematic story from the user's request.
 
-The story should include:
+This is AI STORY mode.
 
-- Title
-- Genre
-- Theme
-- Premise
-- Main characters
-- Character motivations
-- Character arcs
-- Beginning
-- Rising conflict
-- Major turning point
-- Climax
-- Ending
+You may creatively develop the story, including:
+- characters
+- motivations
+- character arcs
+- environments
+- clothing
+- visual design
+- scars or distinctive features
+- injuries
+- props
+- atmosphere
+- cinematic events
 
-The story must be suitable for conversion into scenes and short AI-generated video shots.
+However, once a character design is established, preserve it consistently.
 
-The story should maintain logical continuity.
+The story must contain:
 
-Do not create random scenes that do not contribute to the narrative.
+TITLE
+GENRE
+THEME
+PREMISE
 
-IMPORTANT CHARACTER-NAME RULE:
+MAIN CHARACTERS
+CHARACTER MOTIVATIONS
+CHARACTER ARCS
 
-If the user's request explicitly names a character, preserve that character name exactly.
+BEGINNING
+RISING CONFLICT
+MAJOR TURNING POINT
+CLIMAX
+ENDING
 
-Do not:
+The story must be suitable for conversion into scenes and 4–15 second H3 video shots.
 
-- rename the character
-- translate the character name
-- replace the character with another name
-- invent a different name for the same explicitly named character
+Do not create random scenes.
 
-An explicit character name is authoritative for the entire production pipeline.
-
-If the user uses a character name that corresponds to an existing character asset, preserve that exact name.
+If the user explicitly gives a character name, preserve that exact name.
 
 USER REQUEST:
 
