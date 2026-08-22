@@ -1,4 +1,5 @@
 dataset_name: minimax-h3-ref2va-q4
+
 backend: minimax-h3
 mode: ref2va
 
@@ -20,14 +21,13 @@ generation:
   ref_image_size: match
 
 references:
-  max_images: 9
-  max_videos: 3
-  max_video_audio: 3
-  max_audio: 3
-  composite_reference: false
+  images: 9
+  videos: 3
+  video_audio: 3
+  standalone_audio: 3
+  total_max: 12
 
 identity:
-  structured_profile: true
   face: true
   hair: true
   body: true
@@ -39,29 +39,23 @@ identity:
   continuity_rules: true
 
 continuity:
-  first_shot: native_ref2va
-  later_shots: h3_memory
-  last_frame_anchor: true
+  first_shot: ref2va
+  later_shots: last_frame_chain
+  long_form_memory: true
 
 offload:
-  qwen_planner_unload_before_h3: true
+  qwen_unload_before_h3: true
   h3_text_encoder_eviction: true
   cpu_vae: true
   lowvram: true
 
 multi_gpu:
   enabled: true
-  mode: scene_parallel
-  base_port: 8188
-  workers:
-    - gpu: 0
-      port: 8188
-    - gpu: 1
-      port: 8189
+  strategy: scene_parallel
+  worker_0_port: 8188
+  worker_1_port: 8189
 
 delivery:
   width: 1280
   height: 720
   fps: 24
-  codec: h264
-  audio_codec: aac
