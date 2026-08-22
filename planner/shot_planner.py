@@ -6,18 +6,20 @@ from pathlib import Path
 from pipeline.identity_continuity import (
     IdentityContinuity,
 )
-from pipeline.reference_manager import (
-    ReferenceManager,
-)
+
 from planner.config import (
+    H3_FPS,
     H3_FRAMES_PER_SHOT,
     H3_HEIGHT,
     H3_STEPS,
     H3_WIDTH,
-    H3_FPS,
     QWEN_SHOT_PLAN_TEMPERATURE,
 )
-from planner.qwen_loader import QwenStoryModel
+
+from planner.qwen_loader import (
+    QwenStoryModel,
+)
+
 from schemas.parser import extract_json
 from schemas.shot import Shot
 
@@ -40,13 +42,7 @@ class ShotPlanner:
             .parents[1]
         )
 
-        self.references = (
-            ReferenceManager(
-                self.project_root
-            )
-        )
-
-    def _read_prompt(self) -> str:
+    def _read_prompt(self):
         return (
             self.project_root
             / "prompts"
@@ -57,9 +53,8 @@ class ShotPlanner:
         )
 
     @staticmethod
-    def _names(
-        values,
-    ) -> list[str]:
+    def _names(values):
+
         if not isinstance(
             values,
             list,
@@ -74,12 +69,12 @@ class ShotPlanner:
 
     def create_shot_plan(
         self,
-        story: str,
-        characters: list,
+        story,
+        characters,
         scene,
-        continuity_context: str = "",
-        shot_start_index: int = 1,
-    ) -> list[Shot]:
+        continuity_context="",
+        shot_start_index=1,
+    ):
 
         character_data = [
             character.to_dict()
@@ -100,21 +95,32 @@ class ShotPlanner:
             else scene
         )
 
-        prompt = self._read_prompt().format(
-            story=story,
-            characters=json.dumps(
-                character_data,
-                indent=2,
-                ensure_ascii=False,
-            ),
-            scene=json.dumps(
-                scene_data,
-                indent=2,
-                ensure_ascii=False,
-            ),
-            continuity_context=(
-                continuity_context
-            ),
+        prompt = (
+            self._read_prompt()
+            .replace(
+                "{story}",
+                story,
+            )
+            .replace(
+                "{characters}",
+                json.dumps(
+                    character_data,
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+            )
+            .replace(
+                "{scene}",
+                json.dumps(
+                    scene_data,
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+            )
+            .replace(
+                "{continuity_context}",
+                continuity_context,
+            )
         )
 
         response = self.model.generate(
@@ -122,10 +128,9 @@ class ShotPlanner:
                 {
                     "role": "system",
                     "content": (
-                        "You are a cinematic shot "
-                        "planning system for "
-                        "MiniMax H3 Ref2VA. "
-                        "Return JSON only."
+                        "You are the shot director "
+                        "for MiniMax H3 Ref2VA. "
+                        "Return valid JSON only."
                     ),
                 },
                 {
@@ -154,6 +159,7 @@ class ShotPlanner:
             "shots",
             [],
         ):
+
             shot_characters = (
                 self._names(
                     item.get(
@@ -172,7 +178,7 @@ class ShotPlanner:
                 )
             )
 
-            selected_characters = [
+            selected = [
                 by_name[name.lower()]
                 for name in shot_characters
                 if name.lower()
@@ -182,11 +188,11 @@ class ShotPlanner:
             image_paths = []
             video_paths = []
             audio_paths = []
-            character_image_bindings = {}
 
-            for character in (
-                selected_characters
-            ):
+            image_bindings = {}
+
+            for character in selected:
+
                 images = (
                     character
                     .normalized_reference_paths()
@@ -204,8 +210,7 @@ class ShotPlanner:
 
                 for path in images:
                     if (
-                        path
-                        not in image_paths
+                        path not in image_paths
                         and len(image_paths) < 9
                     ):
                         image_paths.append(
@@ -214,8 +219,7 @@ class ShotPlanner:
 
                 for path in videos:
                     if (
-                        path
-                        not in video_paths
+                        path not in video_paths
                         and len(video_paths) < 3
                     ):
                         video_paths.append(
@@ -224,108 +228,86 @@ class ShotPlanner:
 
                 for path in audios:
                     if (
-                        path
-                        not in audio_paths
+                        path not in audio_paths
                         and len(audio_paths) < 3
                     ):
                         audio_paths.append(
                             path
                         )
 
-                character_image_bindings[
+                image_bindings[
                     character.name
                 ] = images
 
-            identity_locks = (
+            locks = (
                 IdentityContinuity.build_locks(
-                    characters=selected_characters,
-                    shot_characters=shot_characters,
+                    selected,
+                    shot_characters,
                 )
             )
 
-            reference_bindings = (
+            bindings = (
                 IdentityContinuity
                 .build_reference_bindings(
-                    image_paths=image_paths,
-                    character_bindings=(
-                        character_image_bindings
-                    ),
+                    image_paths,
+                    image_bindings,
                 )
             )
 
-            visual_prompt, negative_prompt = (
-                IdentityContinuity.merge(
-                    visual_prompt=str(
-                        item.get(
-                            "visual_prompt",
-                            "",
-                        )
-                    ),
-                    locks=identity_locks,
-                    bindings=reference_bindings,
-                    negative_prompt=str(
-                        item.get(
-                            "negative_prompt",
-                            "",
-                        )
-                    ),
+            visual_prompt = str(
+                item.get(
+                    "visual_prompt",
+                    "",
                 )
             )
 
-            audio_by_character = {
-                character.name:
-                    character
-                    .normalized_audio_paths()
-                for character
-                in selected_characters
-            }
-
-            video_by_character = {
-                character.name:
-                    character
-                    .normalized_video_paths()
-                for character
-                in selected_characters
-            }
-
-            primary_voice = None
-
-            for speaker in (
-                speaking_characters
-            ):
-                character = by_name.get(
-                    speaker.lower()
+            negative_prompt = str(
+                item.get(
+                    "negative_prompt",
+                    "",
                 )
+            )
 
-                if character is None:
-                    continue
+            (
+                visual_prompt,
+                negative_prompt,
+            ) = IdentityContinuity.merge(
+                visual_prompt=visual_prompt,
+                locks=locks,
+                bindings=bindings,
+                negative_prompt=negative_prompt,
+            )
 
-                audio = (
-                    character
-                    .normalized_audio_paths()
+            primary_audio = (
+                audio_paths[0]
+                if audio_paths
+                else None
+            )
+
+            duration = float(
+                item.get(
+                    "duration_seconds",
+                    5.0,
                 )
-
-                if audio:
-                    primary_voice = audio[0]
-                    break
+            )
 
             shot = Shot(
                 shot_id=(
                     f"shot_"
                     f"{shot_start_index + len(shots):03d}"
                 ),
+
                 scene_id=scene_data.get(
                     "scene_id",
                     "",
                 ),
+
                 order=len(shots) + 1,
-                duration_seconds=float(
-                    item.get(
-                        "duration_seconds",
-                        5.0,
-                    )
-                ),
+
+                duration_seconds=duration,
+
                 characters=shot_characters,
+
                 location=str(
                     item.get(
                         "location",
@@ -335,72 +317,119 @@ class ShotPlanner:
                         ),
                     )
                 ),
+
                 action=str(
                     item.get(
                         "action",
                         "",
                     )
                 ),
+
                 camera_shot=str(
                     item.get(
                         "camera_shot",
                         "",
                     )
                 ),
+
                 camera_movement=str(
                     item.get(
                         "camera_movement",
                         "",
                     )
                 ),
+
                 lighting=str(
                     item.get(
                         "lighting",
                         "",
                     )
                 ),
+
                 mood=str(
                     item.get(
                         "mood",
                         "",
                     )
                 ),
+
                 visual_prompt=visual_prompt,
+
+                retention_analysis=str(
+                    item.get(
+                        "retention_analysis",
+                        "",
+                    )
+                ),
+
+                detailed_description=str(
+                    item.get(
+                        "detailed_description",
+                        "",
+                    )
+                ),
+
+                overall_soundscape=str(
+                    item.get(
+                        "overall_soundscape",
+                        "",
+                    )
+                ),
+
+                non_diegetic_music=str(
+                    item.get(
+                        "non_diegetic_music",
+                        "",
+                    )
+                ),
+
                 negative_prompt=negative_prompt,
+
                 continuity_notes=str(
                     item.get(
                         "continuity_notes",
                         "",
                     )
                 ),
+
                 seed=item.get(
                     "seed"
                 ),
+
                 reference_images=image_paths,
                 reference_videos=video_paths,
-                reference_audio=primary_voice,
+
+                reference_audio=primary_audio,
                 reference_audio_paths=audio_paths,
-                reference_audio_by_character=(
-                    audio_by_character
-                ),
-                reference_video_by_character=(
-                    video_by_character
-                ),
+
+                reference_audio_by_character={
+                    character.name:
+                        character
+                        .normalized_audio_paths()
+                    for character in selected
+                },
+
+                reference_video_by_character={
+                    character.name:
+                        character
+                        .normalized_video_paths()
+                    for character in selected
+                },
+
                 speaking_characters=(
                     speaking_characters
                 ),
+
                 speech_text=str(
                     item.get(
                         "speech_text",
                         "",
                     )
                 ),
-                reference_bindings=(
-                    reference_bindings
-                ),
-                identity_locks=(
-                    identity_locks
-                ),
+
+                reference_bindings=bindings,
+                identity_locks=locks,
+
                 width=H3_WIDTH,
                 height=H3_HEIGHT,
                 fps=H3_FPS,
