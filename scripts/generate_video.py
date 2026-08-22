@@ -33,17 +33,26 @@ def load_clients(
         urls
     ):
 
-        client = (
-            ComfyClient(
-                base_url=url.rstrip("/")
-            )
+        client = ComfyClient(
+            base_url=url.rstrip("/"),
+            timeout=60,
+            request_retries=3,
+        )
+
+        print(
+            f"Checking ComfyUI worker "
+            f"{index}: {url}"
         )
 
         if not client.health_check():
             raise RuntimeError(
-                f"ComfyUI worker unavailable: "
+                "ComfyUI worker unavailable: "
                 f"{url}"
             )
+
+        print(
+            f"Worker {index} is healthy."
+        )
 
         clients[index] = client
 
@@ -52,11 +61,16 @@ def load_clients(
 
 def main():
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description=(
+            "MiniMax H3 Ref2VA Q4 production generator"
+        )
+    )
 
     parser.add_argument(
         "--story",
         required=True,
+        help="Story or generation request.",
     )
 
     parser.add_argument(
@@ -72,9 +86,11 @@ def main():
     parser.add_argument(
         "--worker",
         action="append",
-        default=[
-            "http://127.0.0.1:8188",
-        ],
+        dest="workers",
+        help=(
+            "ComfyUI worker URL. "
+            "Repeat for multiple GPUs."
+        ),
     )
 
     parser.add_argument(
@@ -84,6 +100,14 @@ def main():
 
     args = parser.parse_args()
 
+    worker_urls = (
+        args.workers
+        if args.workers
+        else [
+            "http://127.0.0.1:8188"
+        ]
+    )
+
     from pipeline.production_orchestrator import (
         ProductionOrchestrator,
     )
@@ -92,8 +116,9 @@ def main():
         ProductionOrchestrator()
     )
 
-    try:
+    plan = None
 
+    try:
         plan = (
             orchestrator
             .create_production_plan(
@@ -103,13 +128,10 @@ def main():
         )
 
     finally:
-
         orchestrator.unload_models()
 
-    plan_path = (
-        plan.get(
-            "production_plan_path"
-        )
+    plan_path = plan.get(
+        "production_plan_path"
     )
 
     if plan_path:
@@ -118,11 +140,24 @@ def main():
             plan_path,
         )
 
+    print(
+        "PLANNED SHOTS:",
+        len(
+            plan.get(
+                "shots",
+                [],
+            )
+        ),
+    )
+
     if args.plan_only:
+        print(
+            "Plan-only mode complete."
+        )
         return
 
     clients = load_clients(
-        args.worker
+        worker_urls
     )
 
     from execution.production_runner import (
@@ -136,10 +171,8 @@ def main():
         )
     )
 
-    final = (
-        runner.run(
-            plan
-        )
+    final = runner.run(
+        plan
     )
 
     result = {
@@ -156,12 +189,14 @@ def main():
                 [],
             )
         ),
+        "workers": worker_urls,
     }
 
     print(
         json.dumps(
             result,
             indent=2,
+            ensure_ascii=False,
         )
     )
 
