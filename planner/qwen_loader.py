@@ -28,46 +28,43 @@ class QwenStoryModel:
         self.model_id = model_id
         self.model = None
         self.tokenizer = None
+
         self.model_path = (
             self._resolve_model_path()
         )
 
     def _resolve_model_path(self):
-
         required = (
             "config.json",
             "model.safetensors.index.json",
         )
 
-        for root in (
+        roots = (
             QWEN_KAGGLE_PATH,
             QWEN_LOCAL_PATH,
-        ):
+        )
 
+        for root in roots:
             if not root.is_dir():
                 continue
 
             if all(
                 (
-                    root / file
+                    root / filename
                 ).is_file()
-                for file in required
+                for filename in required
             ):
                 return root
 
             for config in root.rglob(
                 "config.json"
             ):
-
-                candidate = (
-                    config.parent
-                )
+                candidate = config.parent
 
                 if (
                     candidate
                     / "model.safetensors.index.json"
                 ).is_file():
-
                     return candidate
 
         raise FileNotFoundError(
@@ -75,7 +72,6 @@ class QwenStoryModel:
         )
 
     def load(self):
-
         if self.model is not None:
             return
 
@@ -98,16 +94,35 @@ class QwenStoryModel:
 
         self.model.eval()
 
+    def _input_device(self):
+        # Avoid assuming the first parameter device when
+        # Accelerate has sharded/offloaded the model.
+        try:
+            embeddings = (
+                self.model.get_input_embeddings()
+            )
+
+            if embeddings is not None:
+                return (
+                    embeddings.weight.device
+                )
+        except Exception:
+            pass
+
+        return next(
+            self.model.parameters()
+        ).device
+
     def generate(
         self,
         messages: list,
-        max_new_tokens=(
+        max_new_tokens: int = (
             QWEN_MAX_NEW_TOKENS
         ),
-        temperature=(
+        temperature: float = (
             QWEN_STORY_TEMPERATURE
         ),
-        top_p=QWEN_TOP_P,
+        top_p: float = QWEN_TOP_P,
     ) -> str:
 
         if self.model is None:
@@ -127,11 +142,7 @@ class QwenStoryModel:
             return_tensors="pt",
         )
 
-        device = (
-            next(
-                self.model.parameters()
-            ).device
-        )
+        device = self._input_device()
 
         inputs = {
             key: value.to(device)
@@ -141,17 +152,14 @@ class QwenStoryModel:
 
         kwargs = {
             **inputs,
-            "max_new_tokens": (
+            "max_new_tokens": int(
                 max_new_tokens
             ),
         }
 
         if temperature <= 0:
-
             kwargs["do_sample"] = False
-
         else:
-
             kwargs.update(
                 {
                     "do_sample": True,
@@ -161,7 +169,6 @@ class QwenStoryModel:
             )
 
         with torch.inference_mode():
-
             output = (
                 self.model.generate(
                     **kwargs
@@ -170,10 +177,12 @@ class QwenStoryModel:
 
         generated = output[
             :,
-            inputs["input_ids"].shape[1]:,
+            inputs[
+                "input_ids"
+            ].shape[1]:,
         ]
 
-        return (
+        result = (
             self.tokenizer
             .batch_decode(
                 generated,
@@ -182,8 +191,14 @@ class QwenStoryModel:
             .strip()
         )
 
-    def unload(self):
+        if not result:
+            raise RuntimeError(
+                "Qwen returned empty output."
+            )
 
+        return result
+
+    def unload(self):
         if self.model is not None:
             del self.model
             self.model = None
@@ -195,15 +210,12 @@ class QwenStoryModel:
         gc.collect()
 
         if torch.cuda.is_available():
-
             for device_id in range(
                 torch.cuda.device_count()
             ):
-
                 with torch.cuda.device(
                     device_id
                 ):
-
                     torch.cuda.empty_cache()
 
                     try:
