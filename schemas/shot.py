@@ -28,28 +28,46 @@ class Shot:
     continuity_notes: str = ""
     seed: Optional[int] = None
 
-    # H3 Ref2VA media inputs.
-    reference_images: list[str] = field(default_factory=list)
-    reference_masks: list[str] = field(default_factory=list)
-    reference_videos: list[str] = field(default_factory=list)
+    # H3 media references.
+    reference_images: list[str] = field(
+        default_factory=list
+    )
+    reference_videos: list[str] = field(
+        default_factory=list
+    )
     reference_audio: Optional[str] = None
 
-    # The current H3 multishot sampler has one voice_ref lane.
-    # Keep the full application-level mapping separately so future
-    # backends/workflows can expose more audio lanes.
-    reference_audio_by_character: dict = field(default_factory=dict)
-    reference_video_by_character: dict = field(default_factory=dict)
+    reference_audio_paths: list[str] = field(
+        default_factory=list
+    )
 
-    speaking_characters: list[str] = field(default_factory=list)
+    reference_audio_by_character: dict = field(
+        default_factory=dict
+    )
+
+    reference_video_by_character: dict = field(
+        default_factory=dict
+    )
+
+    speaking_characters: list[str] = field(
+        default_factory=list
+    )
+
     speech_text: str = ""
 
-    # Binding text for multiple identities.
-    reference_bindings: list[str] = field(default_factory=list)
+    reference_bindings: list[str] = field(
+        default_factory=list
+    )
+
+    identity_locks: list[str] = field(
+        default_factory=list
+    )
 
     width: int = 960
     height: int = 544
     fps: int = 24
     frames_per_shot: int = 124
+    steps: int = 14
 
     def to_dict(self) -> dict:
         return {
@@ -71,16 +89,32 @@ class Shot:
             "continuity_notes": self.continuity_notes,
             "seed": self.seed,
             "reference_images": self.reference_images,
-            "reference_masks": self.reference_masks,
             "reference_videos": self.reference_videos,
             "reference_audio": self.reference_audio,
-            "reference_audio_by_character": self.reference_audio_by_character,
-            "reference_video_by_character": self.reference_video_by_character,
-            "speaking_characters": self.speaking_characters,
+            "reference_audio_paths": (
+                self.reference_audio_paths
+            ),
+            "reference_audio_by_character": (
+                self.reference_audio_by_character
+            ),
+            "reference_video_by_character": (
+                self.reference_video_by_character
+            ),
+            "speaking_characters": (
+                self.speaking_characters
+            ),
             "speech_text": self.speech_text,
-            "reference_bindings": self.reference_bindings,
+            "reference_bindings": (
+                self.reference_bindings
+            ),
+            "identity_locks": (
+                self.identity_locks
+            ),
             "width": self.width,
             "height": self.height,
             "fps": self.fps,
-            "frames_per_shot": self.frames_per_shot,
+            "frames_per_shot": (
+                self.frames_per_shot
+            ),
+            "steps": self.steps,
         }
