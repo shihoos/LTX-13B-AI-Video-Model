@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import gc
 
 import torch
@@ -19,26 +21,11 @@ from planner.config import (
 
 class QwenStoryModel:
 
-    """
-    Loads and manages Qwen for:
-
-    - Story creation
-    - Character detection
-    - Character planning
-    - Scene planning
-    - Shot planning
-
-    The model is loaded only when required and can
-    be unloaded before LTX generation begins.
-    """
-
     def __init__(
         self,
         model_id: str = QWEN_MODEL_ID,
     ):
-
         self.model_id = model_id
-
         self.model = None
         self.tokenizer = None
 
@@ -47,78 +34,44 @@ class QwenStoryModel:
         )
 
     def _resolve_model_path(self):
-
-        required_files = (
+        required = (
             "config.json",
             "model.safetensors.index.json",
         )
 
-        # ------------------------------------------------------------
-        # Exact Kaggle dataset path
-        # ------------------------------------------------------------
+        candidates = [
+            QWEN_KAGGLE_PATH,
+            QWEN_LOCAL_PATH,
+        ]
 
-        if QWEN_KAGGLE_PATH.is_dir():
+        for root in candidates:
+
+            if not root.is_dir():
+                continue
 
             if all(
                 (
-                    QWEN_KAGGLE_PATH
-                    / filename
+                    root / file
                 ).is_file()
-                for filename in required_files
+                for file in required
             ):
+                return root
 
-                return QWEN_KAGGLE_PATH
-
-            # --------------------------------------------------------
-            # Search recursively inside the attached Kaggle dataset.
-            # --------------------------------------------------------
-
-            for config_path in (
-                QWEN_KAGGLE_PATH.rglob(
-                    "config.json"
-                )
+            for config in root.rglob(
+                "config.json"
             ):
-
-                model_path = (
-                    config_path.parent
+                model_dir = (
+                    config.parent
                 )
 
                 if (
-                    model_path
+                    model_dir
                     / "model.safetensors.index.json"
                 ).is_file():
-
-                    return model_path
-
-        # ------------------------------------------------------------
-        # Local development path
-        # ------------------------------------------------------------
-
-        if QWEN_LOCAL_PATH.is_dir():
-
-            if all(
-                (
-                    QWEN_LOCAL_PATH
-                    / filename
-                ).is_file()
-                for filename in required_files
-            ):
-
-                return QWEN_LOCAL_PATH
-
-        # ------------------------------------------------------------
-        # Model not found
-        # ------------------------------------------------------------
+                    return model_dir
 
         raise FileNotFoundError(
-            "Qwen model was not found.\n\n"
-            "Expected Kaggle dataset path:\n"
-            f"{QWEN_KAGGLE_PATH}\n\n"
-            "Expected local development path:\n"
-            f"{QWEN_LOCAL_PATH}\n\n"
-            "The Qwen dataset must contain:\n"
-            "  config.json\n"
-            "  model.safetensors.index.json"
+            "Qwen model not found."
         )
 
     def load(self):
@@ -126,11 +79,12 @@ class QwenStoryModel:
         if self.model is not None:
             return
 
-        print("=" * 60)
-        print("Loading Qwen story planner")
-        print(f"Model: {self.model_id}")
-        print(f"Path: {self.model_path}")
-        print("=" * 60)
+        print(
+            "Loading Qwen planner:"
+        )
+        print(
+            self.model_path
+        )
 
         self.tokenizer = (
             AutoTokenizer.from_pretrained(
@@ -140,7 +94,8 @@ class QwenStoryModel:
         )
 
         self.model = (
-            AutoModelForCausalLM.from_pretrained(
+            AutoModelForCausalLM
+            .from_pretrained(
                 self.model_path,
                 torch_dtype="auto",
                 device_map="auto",
@@ -150,29 +105,18 @@ class QwenStoryModel:
 
         self.model.eval()
 
-        print(
-            "Qwen story planner loaded successfully."
-        )
-
     def generate(
         self,
         messages: list,
-        max_new_tokens: int = (
-            QWEN_MAX_NEW_TOKENS
-        ),
-        temperature: float = (
-            QWEN_STORY_TEMPERATURE
-        ),
-        top_p: float = (
-            QWEN_TOP_P
-        ),
+        max_new_tokens=QWEN_MAX_NEW_TOKENS,
+        temperature=QWEN_STORY_TEMPERATURE,
+        top_p=QWEN_TOP_P,
     ) -> str:
 
         if self.model is None:
-
             self.load()
 
-        text = (
+        prompt = (
             self.tokenizer
             .apply_chat_template(
                 messages,
@@ -181,101 +125,91 @@ class QwenStoryModel:
             )
         )
 
-        model_inputs = self.tokenizer(
-            [text],
+        inputs = self.tokenizer(
+            [prompt],
             return_tensors="pt",
         )
 
-        model_inputs = {
-            key: value.to(
-                self.model.device
-            )
+        device = (
+            next(
+                self.model.parameters()
+            ).device
+        )
+
+        inputs = {
+            key: value.to(device)
             for key, value
-            in model_inputs.items()
+            in inputs.items()
         }
 
-        generation_kwargs = {
-            **model_inputs,
+        kwargs = {
+            **inputs,
             "max_new_tokens": (
                 max_new_tokens
             ),
         }
 
         if temperature <= 0:
-
-            generation_kwargs[
-                "do_sample"
-            ] = False
-
+            kwargs["do_sample"] = False
         else:
+            kwargs.update(
+                {
+                    "do_sample": True,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                }
+            )
 
-            generation_kwargs[
-                "do_sample"
-            ] = True
-
-            generation_kwargs[
-                "temperature"
-            ] = temperature
-
-            generation_kwargs[
-                "top_p"
-            ] = top_p
-
-        with torch.no_grad():
-
-            output_ids = (
+        with torch.inference_mode():
+            output = (
                 self.model.generate(
-                    **generation_kwargs
+                    **kwargs
                 )
             )
 
-        generated_ids = output_ids[
+        generated = output[
             :,
-            model_inputs[
-                "input_ids"
-            ].shape[1]:
+            inputs["input_ids"].shape[1]:,
         ]
 
-        response = (
+        return (
             self.tokenizer
             .batch_decode(
-                generated_ids,
+                generated,
                 skip_special_tokens=True,
             )[0]
+            .strip()
         )
-
-        return response.strip()
 
     def unload(self):
 
         print(
-            "Unloading Qwen story planner..."
+            "Releasing Qwen before H3..."
         )
 
         if self.model is not None:
-
             del self.model
             self.model = None
 
         if self.tokenizer is not None:
-
             del self.tokenizer
             self.tokenizer = None
 
         gc.collect()
 
         if torch.cuda.is_available():
-
-            torch.cuda.empty_cache()
-
-            try:
-
-                torch.cuda.ipc_collect()
-
-            except RuntimeError:
-
-                pass
+            for device_id in range(
+                torch.cuda.device_count()
+            ):
+                with torch.cuda.device(
+                    device_id
+                ):
+                    torch.cuda.empty_cache()
+                    try:
+                        torch.cuda.ipc_collect()
+                    except Exception:
+                        pass
 
         print(
-            "Qwen memory released."
+            "Qwen completely released."
         )
