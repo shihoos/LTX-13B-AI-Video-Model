@@ -1,75 +1,73 @@
-You are creating a detailed cinematic shot plan.
+Create a production shot plan optimized for MiniMax H3 Ref2VA.
 
-Convert the provided scene into an ordered sequence of video shots.
+The generator supports:
+- up to 9 independent reference images in one H3 scene chain
+- one primary reference video per scene chain
+- one primary voice-reference audio lane per scene chain
+- 24 fps
+- 960x544 base generation, later delivered at 1280x720
 
-Each shot must be independently understandable and suitable for generation by an AI video model.
+Do NOT describe a reference image as the literal opening frame. References are identity/appearance conditioning.
 
-STORY:
+For every shot return:
+- duration_seconds (the application will normalize to the H3 scene-chain frame count)
+- characters
+- speaking_characters
+- speech_text
+- location
+- action
+- camera_shot
+- camera_movement
+- lighting
+- mood
+- visual_prompt
+- negative_prompt
+- continuity_notes
+- seed
 
-{story}
+Reference instructions:
+- Keep visual identity in the reference media and let the story control clothing, environment and action.
+- Mention each relevant character by name.
+- Do not invent clothing from the reference image when the story specifies different clothing.
+- Do not invent the reference background as the scene background.
+- Make camera and environment explicit.
+- When dialogue exists, identify exactly one primary speaking character for the voice reference lane.
+- Do not put two different shots into one visual_prompt. Each shot is separated by the production system.
+- The system may include independent reference-image binding text such as:
+  "<Picture 1>, <Picture 2> are reference images of CHARACTER_A."
+- Never ask for a composite reference image.
 
-CHARACTERS:
-
-{characters}
-
-SCENE:
-
-{scene}
-
-PREVIOUS CONTINUITY CONTEXT:
-
-{continuity_context}
-
-Return ONLY valid JSON in exactly this format:
+Return ONLY JSON:
 
 {
   "shots": [
     {
-      "shot_id": "shot_001",
-      "scene_id": "",
-      "order": 1,
       "duration_seconds": 5.0,
-      "characters": [],
-      "location": "",
-      "action": "",
-      "camera_shot": "",
-      "camera_movement": "",
-      "lighting": "",
-      "mood": "",
-      "visual_prompt": "",
-      "negative_prompt": "",
-      "previous_shot": null,
-      "next_shot": null,
-      "continuity_notes": "",
-      "seed": null,
-      "reference_images": []
+      "characters": ["Character A"],
+      "speaking_characters": ["Character A"],
+      "speech_text": "Exact dialogue, or empty string.",
+      "location": "Where the shot occurs.",
+      "action": "What happens.",
+      "camera_shot": "Camera framing.",
+      "camera_movement": "Camera movement.",
+      "lighting": "Lighting.",
+      "mood": "Mood.",
+      "visual_prompt": "Complete H3 visual prompt.",
+      "negative_prompt": "Undesired visual/audio qualities.",
+      "continuity_notes": "Continuity from the previous shot.",
+      "seed": null
     }
   ]
 }
 
-RULES:
+STORY:
+{story}
 
-- Return valid JSON only.
-- Do not use Markdown.
-- Do not wrap JSON in code fences.
-- Do not include explanations.
-- Generate shots in chronological order.
-- Use the provided scene_id.
-- Use only characters present in the scene unless absolutely necessary.
-- Keep character appearance consistent with the provided character data.
-- Respect character_state.
-- Preserve clothing_state, carried_objects, injuries, and physical_state.
-- Respect scene weather.
-- Respect scene atmosphere.
-- Preserve important environment_details.
-- Preserve key_props when relevant.
-- Respect the scene objective.
-- Respect the previous continuity context.
-- visual_prompt must describe only the visual content needed for that shot.
-- negative_prompt should contain unwanted visual artifacts or qualities.
-- Do not create actual image files.
-- Do not invent reference image paths.
-- reference_images must initially be [].
-- previous_shot and next_shot will be linked later.
-- seed must initially be null.
-- Keep lighting and mood visually consistent with the scene.
+CHARACTERS:
+{characters}
+
+SCENE:
+{scene}
+
+CONTINUITY:
+{continuity_context}
