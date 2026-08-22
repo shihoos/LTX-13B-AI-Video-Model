@@ -4,31 +4,25 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from execution.shot_executor import ShotExecutor
-from pipeline.h3_scene_continuity import H3SceneContinuity
+from execution.shot_executor import (
+    ShotExecutor,
+)
 
 
 class ProductionRunner:
-    """
-    Scene-level H3 production runner.
-
-    First shot only:
-        H3_HardMode_R2V
-
-    Multi-shot scene:
-        H3_HardMode_Chained
-
-    This prevents the old bug where later shots were still submitted to
-    Ref2VA while merely carrying an unused `continuity_start_image` field.
-    """
 
     def __init__(
         self,
         project_root: Path,
         comfy_clients: dict[int, object],
     ):
-        self.project_root = Path(project_root)
-        self.clients = dict(comfy_clients)
+        self.project_root = Path(
+            project_root
+        )
+
+        self.clients = dict(
+            comfy_clients
+        )
 
         self.input_root = (
             self.project_root
@@ -48,15 +42,12 @@ class ProductionRunner:
             exist_ok=True,
         )
 
-        self.continuity = H3SceneContinuity(
-            self.project_root
-        )
-
     def _executor(
         self,
         gpu_id: int,
         scene_id: str,
     ) -> ShotExecutor:
+
         input_dir = (
             self.input_root
             / f"gpu_{gpu_id}"
@@ -69,7 +60,9 @@ class ProductionRunner:
         )
 
         return ShotExecutor(
-            comfy_client=self.clients[gpu_id],
+            comfy_client=self.clients[
+                gpu_id
+            ],
             project_root=self.project_root,
             comfy_input_dir=input_dir,
         )
@@ -80,6 +73,7 @@ class ProductionRunner:
         scene_id: str,
         shots: list[dict[str, Any]],
     ) -> Path:
+
         if gpu_id not in self.clients:
             raise RuntimeError(
                 f"GPU worker {gpu_id} is not configured."
@@ -87,14 +81,25 @@ class ProductionRunner:
 
         if not shots:
             raise ValueError(
-                f"Scene {scene_id} contains no shots."
+                f"Scene {scene_id} has no shots."
             )
+
+        shots = sorted(
+            shots,
+            key=lambda item: int(
+                item.get(
+                    "order",
+                    0,
+                )
+            ),
+        )
 
         output_dir = (
             self.output_root
             / f"gpu_{gpu_id}"
             / str(scene_id)
         )
+
         output_dir.mkdir(
             parents=True,
             exist_ok=True,
@@ -105,56 +110,62 @@ class ProductionRunner:
             scene_id,
         )
 
-        # A single-shot scene uses native Ref2VA.
         if len(shots) == 1:
-            result = executor.execute_native_ref2va(
-                shots[0],
+            return (
+                executor.execute_native_ref2va(
+                    shots[0],
+                    output_dir,
+                )
+            )
+
+        return (
+            executor.execute_hardmode_chained(
+                shots,
                 output_dir,
             )
-
-            self.continuity.prepare_next_shot(
-                result,
-                scene_id,
-                shots[0]["shot_id"],
-            )
-
-            return result
-
-        # Multi-shot scenes use the complete upstream Hard Mode Chained graph.
-        master = executor.execute_hardmode_chained(
-            shots,
-            output_dir,
         )
-
-        # Persist one scene checkpoint. The chained workflow itself is the
-        # source of last-frame continuity between individual shots.
-        self.continuity.prepare_next_shot(
-            master,
-            scene_id,
-            f"{scene_id}_master",
-        )
-
-        return master
 
     @staticmethod
     def concat(
         videos: list[Path],
         destination: Path,
     ) -> Path:
+
         if not videos:
-            raise ValueError("No videos supplied.")
+            raise ValueError(
+                "No videos supplied for concat."
+            )
 
         destination.parent.mkdir(
             parents=True,
             exist_ok=True,
         )
 
-        manifest = destination.with_suffix(".txt")
-        manifest.write_text(
-            "\n".join(
-                f"file '{path.resolve()}'"
-                for path in videos
+        manifest = (
+            destination.with_suffix(
+                ".txt"
             )
+        )
+
+        lines = []
+
+        for path in videos:
+            escaped = (
+                str(
+                    path.resolve()
+                )
+                .replace(
+                    "'",
+                    "'\\''"
+                )
+            )
+
+            lines.append(
+                f"file '{escaped}'"
+            )
+
+        manifest.write_text(
+            "\n".join(lines)
             + "\n",
             encoding="utf-8",
         )
@@ -187,7 +198,13 @@ class ProductionRunner:
         if result.returncode != 0:
             raise RuntimeError(
                 "FFmpeg concat failed:\n"
-                + result.stderr[-4000:]
+                + result.stderr[-5000:]
+            )
+
+        if not destination.is_file():
+            raise RuntimeError(
+                "FFmpeg reported success but "
+                "the concatenated video does not exist."
             )
 
         return destination
@@ -197,6 +214,7 @@ class ProductionRunner:
         source: Path,
         destination: Path,
     ) -> Path:
+
         destination.parent.mkdir(
             parents=True,
             exist_ok=True,
@@ -236,7 +254,7 @@ class ProductionRunner:
         if result.returncode != 0:
             raise RuntimeError(
                 "720p export failed:\n"
-                + result.stderr[-4000:]
+                + result.stderr[-5000:]
             )
 
         return destination
@@ -245,42 +263,76 @@ class ProductionRunner:
         self,
         production_plan: dict[str, Any],
     ) -> Path:
-        shots = production_plan.get("shots", [])
+
+        shots = production_plan.get(
+            "shots",
+            []
+        )
+
         if not shots:
             raise RuntimeError(
                 "Production plan contains no shots."
             )
 
-        scenes: dict[str, list[dict[str, Any]]] = {}
+        scenes: dict[
+            str,
+            list[dict[str, Any]]
+        ] = {}
 
         for shot in shots:
-            scenes.setdefault(
-                str(shot["scene_id"]),
-                [],
-            ).append(shot)
+            scene_id = str(
+                shot.get(
+                    "scene_id",
+                    "",
+                )
+            )
 
-        gpu_ids = list(self.clients)
+            if not scene_id:
+                raise RuntimeError(
+                    "Shot is missing scene_id."
+                )
+
+            scenes.setdefault(
+                scene_id,
+                []
+            ).append(
+                shot
+            )
+
+        gpu_ids = sorted(
+            self.clients.keys()
+        )
+
         if not gpu_ids:
             raise RuntimeError(
-                "No GPU workers configured."
+                "No ComfyUI GPU workers configured."
             )
 
-        scene_masters: list[Path] = []
+        ordered_scenes = sorted(
+            scenes.items(),
+            key=lambda item: min(
+                int(
+                    shot.get(
+                        "order",
+                        0,
+                    )
+                )
+                for shot in item[1]
+            ),
+        )
 
-        for index, (scene_id, scene_shots) in enumerate(
-            sorted(
-                scenes.items(),
-                key=lambda item: (
-                    min(
-                        int(shot.get("order", 0))
-                        for shot in item[1]
-                    ),
-                    item[0],
-                ),
-            )
+        scene_masters = []
+
+        for index, (
+            scene_id,
+            scene_shots,
+        ) in enumerate(
+            ordered_scenes
         ):
-            # Scene-parallel scheduling remains across independent scenes.
-            gpu_id = gpu_ids[index % len(gpu_ids)]
+
+            gpu_id = gpu_ids[
+                index % len(gpu_ids)
+            ]
 
             master = self.run_scene(
                 gpu_id=gpu_id,
@@ -288,7 +340,9 @@ class ProductionRunner:
                 shots=scene_shots,
             )
 
-            scene_masters.append(master)
+            scene_masters.append(
+                master
+            )
 
         native_master = (
             self.output_root
