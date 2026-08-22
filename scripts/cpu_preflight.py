@@ -394,7 +394,6 @@ def check_files() -> None:
         f"{len(required)}"
     )
 
-
 def validate_identity_reference_contract() -> None:
 
     processor = read_text(
@@ -414,51 +413,31 @@ def validate_identity_reference_contract() -> None:
     )
 
     executor = read_text(
-        SHOT_EXECUTOR
-    )
-
-    manager = read_text(
-        PROJECT_ROOT
-        / "pipeline"
-        / "reference_manager.py"
-    )
-
-    planner = read_text(
-        PROJECT_ROOT
-        / "planner"
-        / "character_planner.py"
-    )
-
-    shot_planner = read_text(
-        PROJECT_ROOT
-        / "planner"
-        / "shot_planner.py"
-    )
-
-    manager = read_text(
-        ROOT
-        / "pipeline"
-        / "reference_manager.py"
-    )
-
-    planner = read_text(
-        ROOT
-        / "planner"
-        / "character_planner.py"
-    )
-
-    shot_planner = read_text(
-        ROOT
-        / "planner"
-        / "shot_planner.py"
-    )
-
-    SHOT_EXECUTOR = (
         EXECUTION_DIR
         / "shot_executor.py"
     )
 
+    manager = read_text(
+        ROOT
+        / "pipeline"
+        / "reference_manager.py"
+    )
+
+    planner = read_text(
+        ROOT
+        / "planner"
+        / "character_planner.py"
+    )
+
+    shot_planner = read_text(
+        ROOT
+        / "planner"
+        / "shot_planner.py"
+    )
+
+    # ------------------------------------------------------------------------
     # Processor
+    # ------------------------------------------------------------------------
 
     for text in (
         "CharacterReferenceProcessor",
@@ -475,7 +454,9 @@ def validate_identity_reference_contract() -> None:
             f"is missing contract: {text}",
         )
 
+    # ------------------------------------------------------------------------
     # Character schema
+    # ------------------------------------------------------------------------
 
     require(
         "reference_mask_path"
@@ -484,7 +465,9 @@ def validate_identity_reference_contract() -> None:
         "reference_mask_path.",
     )
 
+    # ------------------------------------------------------------------------
     # Shot schema
+    # ------------------------------------------------------------------------
 
     require(
         "reference_masks"
@@ -493,7 +476,9 @@ def validate_identity_reference_contract() -> None:
         "reference_masks.",
     )
 
+    # ------------------------------------------------------------------------
     # Reference manager
+    # ------------------------------------------------------------------------
 
     require(
         "mask_path"
@@ -502,7 +487,9 @@ def validate_identity_reference_contract() -> None:
         "identity mask paths.",
     )
 
+    # ------------------------------------------------------------------------
     # Character planner
+    # ------------------------------------------------------------------------
 
     require(
         "reference_mask_path"
@@ -511,7 +498,9 @@ def validate_identity_reference_contract() -> None:
         "reference_mask_path.",
     )
 
+    # ------------------------------------------------------------------------
     # Shot planner
+    # ------------------------------------------------------------------------
 
     require(
         "reference_masks"
@@ -520,7 +509,9 @@ def validate_identity_reference_contract() -> None:
         "reference_masks.",
     )
 
+    # ------------------------------------------------------------------------
     # Adapter
+    # ------------------------------------------------------------------------
 
     for text in (
         "set_identity_reference_image",
@@ -533,7 +524,9 @@ def validate_identity_reference_contract() -> None:
             f"{text}.",
         )
 
+    # ------------------------------------------------------------------------
     # Executor
+    # ------------------------------------------------------------------------
 
     for text in (
         "reference_masks",
@@ -550,6 +543,7 @@ def validate_identity_reference_contract() -> None:
     print(
         "OK   identity reference contract"
     )
+
 
 # ============================================================================
 # 2. PYTHON SYNTAX
