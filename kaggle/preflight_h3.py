@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -15,9 +16,9 @@ COMFY = (
     / "ComfyUI"
 )
 
-
 REQUIRED_FILES = [
-    COMFY / "main.py",
+    COMFY
+    / "main.py",
 
     COMFY
     / "custom_nodes"
@@ -30,6 +31,10 @@ REQUIRED_FILES = [
     COMFY
     / "custom_nodes"
     / "ComfyUI-VideoHelperSuite",
+
+    COMFY
+    / "custom_nodes"
+    / "comfyui-workflow-to-api-converter-endpoint",
 
     COMFY
     / "models"
@@ -48,6 +53,11 @@ REQUIRED_FILES = [
 
     COMFY
     / "models"
+    / "text_encoders"
+    / "qwen3vl_32b_minimax_h3-mmproj-BF16.gguf",
+
+    COMFY
+    / "models"
     / "vae"
     / "minimax_h3_video_vae_fp16.safetensors",
 
@@ -57,24 +67,150 @@ REQUIRED_FILES = [
     / "minimax_h3_audio_vae_fp32.safetensors",
 ]
 
+WORKFLOWS = [
+    ROOT
+    / "workflows"
+    / "MiniMax-H3"
+    / "base"
+    / "H3_HardMode_R2V.json",
 
-REQUIRED_NODES = [
-    "H3ModelLoaderAny",
-    "H3ClipLoaderAny",
-    "MiniMaxH3ReferenceToVideo",
-    "H3FreeTextEncoder",
-    "H3ReferenceAudio",
-    "H3MultishotMemorySampler",
-    "VAEDecode",
-    "VAEDecodeAudio",
-    "RandomNoise",
-    "BasicGuider",
-    "KSamplerSelect",
-    "BasicScheduler",
-    "SamplerCustomAdvanced",
-    "CreateVideo",
-    "SaveVideo",
+    ROOT
+    / "workflows"
+    / "MiniMax-H3"
+    / "base"
+    / "H3_HardMode_Chained.json",
 ]
+
+
+def check_files() -> bool:
+
+    failed = False
+
+    print(
+        "\nFILES"
+    )
+    print(
+        "-" * 72
+    )
+
+    for path in REQUIRED_FILES:
+
+        exists = (
+            path.exists()
+            or path.is_symlink()
+        )
+
+        print(
+            "[OK]   "
+            if exists
+            else "[FAIL] ",
+            path,
+        )
+
+        if not exists:
+            failed = True
+
+    return not failed
+
+
+def check_workflows() -> bool:
+
+    failed = False
+
+    print(
+        "\nWORKFLOWS"
+    )
+    print(
+        "-" * 72
+    )
+
+    for path in WORKFLOWS:
+
+        if not path.is_file():
+            print(
+                "[FAIL] ",
+                path,
+            )
+            failed = True
+            continue
+
+        try:
+            data = json.loads(
+                path.read_text(
+                    encoding="utf-8"
+                )
+            )
+        except Exception as error:
+            print(
+                "[FAIL] ",
+                path,
+                error,
+            )
+            failed = True
+            continue
+
+        if not isinstance(
+            data,
+            dict,
+        ):
+            print(
+                "[FAIL] workflow root is not object:",
+                path,
+            )
+            failed = True
+            continue
+
+        print(
+            "[OK]   ",
+            path,
+        )
+
+    return not failed
+
+
+def check_imports() -> bool:
+
+    sys.path.insert(
+        0,
+        str(COMFY),
+    )
+
+    print(
+        "\nIMPORTS"
+    )
+    print(
+        "-" * 72
+    )
+
+    try:
+        import nodes  # noqa: F401
+
+        print(
+            "[OK]   ComfyUI nodes"
+        )
+
+    except Exception as error:
+        print(
+            "[FAIL] ComfyUI nodes:",
+            error,
+        )
+        return False
+
+    try:
+        import comfy_extras.nodes_minimax_h3  # noqa: F401
+
+        print(
+            "[OK]   native MiniMax H3"
+        )
+
+    except Exception as error:
+        print(
+            "[FAIL] native MiniMax H3:",
+            error,
+        )
+        return False
+
+    return True
 
 
 def main() -> int:
@@ -82,70 +218,34 @@ def main() -> int:
     print(
         "=" * 72
     )
-
     print(
-        "MINIMAX H3 REF2VA PREFLIGHT"
+        "MINIMAX H3 REF2VA Q4 PREFLIGHT"
     )
-
     print(
         "=" * 72
     )
 
-    failed = False
+    ok = True
 
-    for path in REQUIRED_FILES:
+    ok &= check_files()
+    ok &= check_workflows()
+    ok &= check_imports()
 
-        ok = (
-            path.exists()
-            or path.is_symlink()
-        )
+    print()
 
+    if ok:
         print(
-            "OK   "
-            if ok
-            else "FAIL ",
-            path,
+            "PREFLIGHT PASSED."
         )
-
-        if not ok:
-            failed = True
-
-    if failed:
-        return 2
-
-    sys.path.insert(
-        0,
-        str(COMFY),
-    )
-
-    try:
-        import nodes  # noqa: F401
-        import comfy_extras.nodes_minimax_h3  # noqa: F401
-
-    except Exception as error:
-
         print(
-            "Native H3 import failed:"
+            "Next: start ComfyUI and run verify_live_runtime.py."
         )
-
-        print(error)
-
-        return 3
+        return 0
 
     print(
-        "\nRequired runtime files are present."
+        "PREFLIGHT FAILED."
     )
-
-    print(
-        "Native MiniMax H3 core imported."
-    )
-
-    print(
-        "\nRun verify_live_runtime.py after "
-        "starting ComfyUI."
-    )
-
-    return 0
+    return 2
 
 
 if __name__ == "__main__":
