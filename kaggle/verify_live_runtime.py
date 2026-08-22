@@ -4,47 +4,91 @@ import json
 import urllib.request
 
 
-BASE_URL = "http://127.0.0.1:8188"
+BASE_URL = (
+    "http://127.0.0.1:8188"
+)
 
 
-def get(path: str):
+REQUIRED_NODES = [
+    "H3ModelLoaderAny",
+    "H3ClipLoaderAny",
+    "MiniMaxH3ReferenceToVideo",
+    "H3FreeTextEncoder",
+    "H3ReferenceAudio",
+    "H3MultishotMemorySampler",
+    "VAEDecode",
+    "VAEDecodeAudio",
+    "SamplerCustomAdvanced",
+    "CreateVideo",
+    "SaveVideo",
+]
+
+
+def get(
+    path: str,
+):
+
     with urllib.request.urlopen(
         BASE_URL + path,
         timeout=60,
     ) as response:
-        return json.loads(response.read().decode("utf-8"))
+
+        return json.loads(
+            response
+            .read()
+            .decode("utf-8")
+        )
 
 
 def main():
-    stats = get("/system_stats")
-    objects = get("/object_info")
 
-    required = [
-        "H3ModelLoaderAny",
-        "H3ClipLoaderAny",
-        "H3MultishotMemorySampler",
-        "H3ReferenceAudio",
-    ]
+    stats = get(
+        "/system_stats"
+    )
+
+    objects = get(
+        "/object_info"
+    )
 
     missing = [
-        name for name in required
+        name
+        for name
+        in REQUIRED_NODES
         if name not in objects
     ]
 
-    print("ComfyUI healthy:", bool(stats))
-    print("Required H3 nodes:")
-    for name in required:
+    print(
+        "ComfyUI healthy:",
+        bool(stats),
+    )
+
+    print(
+        "\nH3 runtime nodes:"
+    )
+
+    for name in REQUIRED_NODES:
+
         print(
-            ("OK   " if name not in missing else "FAIL "),
+            (
+                "OK   "
+                if name not in missing
+                else "FAIL "
+            ),
             name,
         )
 
     if missing:
+
         raise SystemExit(
-            "H3 runtime is incomplete."
+            "Missing H3 runtime nodes:\n"
+            + "\n".join(
+                missing
+            )
         )
 
-    print("\nH3 Ref2VA runtime is live.")
+    print(
+        "\nH3 Ref2VA runtime is ready."
+    )
 
 
 if __name__ == "__main__":
