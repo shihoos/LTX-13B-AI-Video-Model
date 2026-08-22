@@ -1,8 +1,8 @@
 {
   "id": "394ed254-7306-42a2-9ae6-aa880ce4456d",
   "revision": 0,
-  "last_node_id": 1893,
-  "last_link_id": 5441,
+  "last_node_id": 1904,
+  "last_link_id": 5444,
   "nodes": [
     {
       "id": 7,
@@ -213,10 +213,10 @@
       "outputs": [],
       "properties": {},
       "widgets_values": [
-        "Presets override the values inside \ud83c\udd5b\ud83c\udd63\ud83c\udd67 STG Guider Advanced node."
+        "Presets override the values inside 🅛🅣🅧 STG Guider Advanced node."
       ],
       "widgets_values_named": {
-        "text": "Presets override the values inside \ud83c\udd5b\ud83c\udd63\ud83c\udd67 STG Guider Advanced node."
+        "text": "Presets override the values inside 🅛🅣🅧 STG Guider Advanced node."
       },
       "color": "#432",
       "bgcolor": "#653"
@@ -417,7 +417,7 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 5430
+          "link": 5443
         },
         {
           "name": "positive",
@@ -562,7 +562,7 @@
         {
           "name": "model",
           "type": "MODEL",
-          "link": 5431
+          "link": 5444
         },
         {
           "name": "vae",
@@ -783,8 +783,7 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            5430,
-            5431
+            5442
           ]
         }
       ],
@@ -978,6 +977,50 @@
       },
       "color": "#232",
       "bgcolor": "#353"
+    },
+    {
+      "id": 1904,
+      "type": "LoraLoaderModelOnly",
+      "pos": [
+        1510.0,
+        2264.0
+      ],
+      "size": [
+        315.0,
+        126.0
+      ],
+      "flags": {},
+      "order": 25,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 5442
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            5443,
+            5444
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "title": "Character Identity LoRA",
+      "widgets_values": [
+        "__CHARACTER_IDENTITY_LORA__.safetensors",
+        1.0
+      ],
+      "widgets_values_named": {
+        "lora_name": "__CHARACTER_IDENTITY_LORA__.safetensors",
+        "strength_model": 1.0
+      }
     }
   ],
   "links": [
@@ -1086,22 +1129,6 @@
       "GUIDER"
     ],
     [
-      5430,
-      1891,
-      0,
-      1887,
-      0,
-      "MODEL"
-    ],
-    [
-      5431,
-      1891,
-      0,
-      1338,
-      0,
-      "MODEL"
-    ],
-    [
       5432,
       1892,
       0,
@@ -1132,6 +1159,30 @@
       1872,
       0,
       "VAE"
+    ],
+    [
+      5442,
+      1891,
+      0,
+      1904,
+      0,
+      "MODEL"
+    ],
+    [
+      5443,
+      1904,
+      0,
+      1887,
+      0,
+      "MODEL"
+    ],
+    [
+      5444,
+      1904,
+      0,
+      1338,
+      0,
+      "MODEL"
     ]
   ],
   "groups": [
