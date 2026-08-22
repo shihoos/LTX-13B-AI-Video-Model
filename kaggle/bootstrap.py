@@ -1,23 +1,34 @@
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-COMFY_ROOT = PROJECT_ROOT / "ComfyUI"
-CUSTOM_ROOT = COMFY_ROOT / "custom_nodes"
+PROJECT_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parents[1]
+)
 
-DATASET_SLUG = os.getenv(
-    "H3_DATASET_SLUG",
-    "minimax-h3-ref2va-q4",
+COMFY_ROOT = (
+    PROJECT_ROOT
+    / "ComfyUI"
+)
+
+CUSTOM_ROOT = (
+    COMFY_ROOT
+    / "custom_nodes"
 )
 
 
 def run(*args: str) -> None:
-    print("+", " ".join(args))
+
+    print(
+        "+",
+        " ".join(args),
+    )
+
     subprocess.run(
         args,
         check=True,
@@ -28,10 +39,8 @@ def clone(
     url: str,
     destination: Path,
 ) -> None:
+
     if destination.exists():
-        print(
-            f"Already installed: {destination}"
-        )
         return
 
     run(
@@ -44,7 +53,8 @@ def clone(
     )
 
 
-def find_dataset() -> Path:
+def find_h3_dataset() -> Path:
+
     marker = (
         "minimax_h3_ref2va_pruned-Q4_K_M.gguf"
     )
@@ -53,7 +63,9 @@ def find_dataset() -> Path:
         "/kaggle/input"
     ).rglob(marker):
 
-        root = model.parent.parent.parent
+        root = (
+            model.parent.parent.parent
+        )
 
         required = [
             root
@@ -94,7 +106,7 @@ def find_dataset() -> Path:
     )
 
 
-def link_file(
+def link(
     source: Path,
     destination: Path,
 ) -> None:
@@ -120,7 +132,10 @@ def link_file(
     )
 
     print(
-        f"LINKED {destination.name}"
+        "LINK:",
+        destination,
+        "->",
+        source,
     )
 
 
@@ -128,13 +143,13 @@ def install_models(
     dataset_root: Path,
 ) -> None:
 
-    source = (
+    models = (
         dataset_root
         / "models"
     )
 
-    link_file(
-        source
+    link(
+        models
         / "diffusion_models"
         / "minimax_h3_ref2va_pruned-Q4_K_M.gguf",
         COMFY_ROOT
@@ -143,8 +158,8 @@ def install_models(
         / "minimax_h3_ref2va_pruned-Q4_K_M.gguf",
     )
 
-    link_file(
-        source
+    link(
+        models
         / "text_encoders"
         / "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
         COMFY_ROOT
@@ -153,9 +168,8 @@ def install_models(
         / "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
     )
 
-    # CRITICAL: H3 Qwen3-VL vision sidecar.
-    link_file(
-        source
+    link(
+        models
         / "text_encoders"
         / "Qwen3-VL-32B-Instruct-MiniMax-H3-L0-49-mmproj-BF16.gguf",
         COMFY_ROOT
@@ -164,8 +178,8 @@ def install_models(
         / "Qwen3-VL-32B-Instruct-MiniMax-H3-L0-49-mmproj-BF16.gguf",
     )
 
-    link_file(
-        source
+    link(
+        models
         / "vae"
         / "minimax_h3_video_vae_fp16.safetensors",
         COMFY_ROOT
@@ -174,8 +188,8 @@ def install_models(
         / "minimax_h3_video_vae_fp16.safetensors",
     )
 
-    link_file(
-        source
+    link(
+        models
         / "vae"
         / "minimax_h3_audio_vae_fp32.safetensors",
         COMFY_ROOT
@@ -192,10 +206,15 @@ def main():
         exist_ok=True,
     )
 
-    clone(
-        "https://github.com/comfyanonymous/ComfyUI.git",
-        COMFY_ROOT,
-    )
+    if not (
+        COMFY_ROOT
+        / "main.py"
+    ).exists():
+
+        clone(
+            "https://github.com/comfyanonymous/ComfyUI.git",
+            COMFY_ROOT,
+        )
 
     run(
         sys.executable,
@@ -233,11 +252,8 @@ def main():
         / "ComfyUI-VideoHelperSuite",
     )
 
-    dataset = find_dataset()
-
-    print(
-        "\nH3 dataset:",
-        dataset,
+    dataset = (
+        find_h3_dataset()
     )
 
     install_models(
