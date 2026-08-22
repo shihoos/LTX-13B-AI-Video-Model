@@ -5,40 +5,6 @@ from typing import Any
 
 
 class H3WorkflowBuilder:
-    """
-    Builds the actual API graph for MiniMax H3 Ref2VA Q4.
-
-    Architecture:
-
-        H3ModelLoaderAny
-              +
-        H3ClipLoaderAny
-              +
-             VAEs
-              +
-        reference images
-        reference videos
-        reference audio
-              +
-    MiniMaxH3ReferenceToVideo
-              |
-        H3FreeTextEncoder
-              |
-        BasicGuider
-              |
-        SamplerCustomAdvanced
-              |
-        VAEDecode / VAEDecodeAudio
-              |
-        CreateVideo
-              |
-        SaveVideo
-
-    The first shot is native Ref2VA.
-
-    Continuation shots are handled separately by
-    H3MultishotMemorySampler.
-    """
 
     MODEL = (
         "minimax_h3_ref2va_pruned-Q4_K_M.gguf"
@@ -66,27 +32,25 @@ class H3WorkflowBuilder:
         )
         self.object_info = object_info
 
-    def _require_node(
+    def _require(
         self,
-        class_type: str,
+        node_name: str,
     ) -> None:
 
-        if class_type not in self.object_info:
+        if node_name not in self.object_info:
             raise RuntimeError(
-                "Required ComfyUI node is not "
-                f"available: {class_type}"
+                f"Required H3 node missing: {node_name}"
             )
 
-    def _require_runtime(
+    def validate_runtime(
         self,
     ) -> None:
 
-        required = [
+        required = (
             "H3ModelLoaderAny",
             "H3ClipLoaderAny",
             "MiniMaxH3ReferenceToVideo",
             "H3FreeTextEncoder",
-            "H3ReferenceAudio",
             "VAELoader",
             "VAEDecode",
             "VAEDecodeAudio",
@@ -97,14 +61,13 @@ class H3WorkflowBuilder:
             "SamplerCustomAdvanced",
             "CreateVideo",
             "SaveVideo",
-        ]
+        )
 
         for node in required:
-            self._require_node(node)
+            self._require(node)
 
     @staticmethod
-    def _image_node(
-        node_id: str,
+    def _load_image(
         filename: str,
     ) -> dict:
 
@@ -116,8 +79,7 @@ class H3WorkflowBuilder:
         }
 
     @staticmethod
-    def _audio_node(
-        node_id: str,
+    def _load_audio(
         filename: str,
     ) -> dict:
 
@@ -129,8 +91,7 @@ class H3WorkflowBuilder:
         }
 
     @staticmethod
-    def _video_node(
-        node_id: str,
+    def _load_video(
         filename: str,
     ) -> dict:
 
@@ -163,25 +124,11 @@ class H3WorkflowBuilder:
         ref_image_size: str = "match",
     ) -> dict:
 
-        self._require_runtime()
+        self.validate_runtime()
 
-        if len(image_files) > 9:
-            raise ValueError(
-                "MiniMax H3 Ref2VA supports at most "
-                "9 reference images."
-            )
-
-        if len(video_files) > 3:
-            raise ValueError(
-                "MiniMax H3 Ref2VA supports at most "
-                "3 reference videos."
-            )
-
-        if len(audio_files) > 3:
-            raise ValueError(
-                "MiniMax H3 Ref2VA supports at most "
-                "3 standalone audio references."
-            )
+        image_files = image_files[:9]
+        video_files = video_files[:3]
+        audio_files = audio_files[:3]
 
         nodes: dict[str, dict] = {}
 
@@ -214,82 +161,49 @@ class H3WorkflowBuilder:
             },
         }
 
-        # --------------------------------------------------------
-        # Reference images
-        # --------------------------------------------------------
-
+        # Reference image nodes.
         for index, filename in enumerate(
-            image_files[:9]
+            image_files
         ):
             node_id = str(
                 10 + index
             )
 
             nodes[node_id] = (
-                self._image_node(
-                    node_id,
-                    filename,
+                self._load_image(
+                    filename
                 )
             )
 
-        # --------------------------------------------------------
-        # Reference videos
-        # --------------------------------------------------------
-
+        # Reference video nodes.
         for index, filename in enumerate(
-            video_files[:3]
+            video_files
         ):
             node_id = str(
                 30 + index
             )
 
             nodes[node_id] = (
-                self._video_node(
-                    node_id,
-                    filename,
+                self._load_video(
+                    filename
                 )
             )
 
-        # --------------------------------------------------------
-        # Standalone reference audio
-        # --------------------------------------------------------
-
+        # Reference audio nodes.
         for index, filename in enumerate(
-            audio_files[:3]
+            audio_files
         ):
-            load_id = str(
-                40 + index
-            )
-
-            ref_id = str(
+            node_id = str(
                 50 + index
             )
 
-            nodes[load_id] = (
-                self._audio_node(
-                    load_id,
-                    filename,
+            nodes[node_id] = (
+                self._load_audio(
+                    filename
                 )
             )
 
-            nodes[ref_id] = {
-                "class_type": (
-                    "H3ReferenceAudio"
-                ),
-                "inputs": {
-                    "audio": [
-                        load_id,
-                        0,
-                    ],
-                    "max_seconds": 10.0,
-                },
-            }
-
-        # --------------------------------------------------------
-        # Native H3 Ref2VA
-        # --------------------------------------------------------
-
-        ref2va_inputs = {
+        ref_inputs: dict[str, Any] = {
             "clip": [
                 "2",
                 0,
@@ -306,15 +220,14 @@ class H3WorkflowBuilder:
             "width": int(width),
             "height": int(height),
             "length": int(frames),
-            "ref_image_size": (
-                ref_image_size
-            ),
+            "ref_image_size": ref_image_size,
         }
 
+        # H3 uses 0-based API slots and 1-based prompt ordinals.
         for index in range(
-            min(len(image_files), 9)
+            len(image_files)
         ):
-            ref2va_inputs[
+            ref_inputs[
                 f"ref_images.ref_image_{index}"
             ] = [
                 str(10 + index),
@@ -322,17 +235,17 @@ class H3WorkflowBuilder:
             ]
 
         for index in range(
-            min(len(video_files), 3)
+            len(video_files)
         ):
-            ref2va_inputs[
-                f"ref_videos.ref_video_{index}"
+            ref_inputs[
+                "ref_videos."
+                f"ref_video_{index}"
             ] = [
                 str(30 + index),
                 0,
             ]
 
-            # VHS_LoadVideo output 2 is AUDIO.
-            ref2va_inputs[
+            ref_inputs[
                 "ref_video_audios."
                 f"ref_video_audio_{index}"
             ] = [
@@ -341,9 +254,9 @@ class H3WorkflowBuilder:
             ]
 
         for index in range(
-            min(len(audio_files), 3)
+            len(audio_files)
         ):
-            ref2va_inputs[
+            ref_inputs[
                 "ref_audios."
                 f"ref_audio_{index}"
             ] = [
@@ -355,20 +268,12 @@ class H3WorkflowBuilder:
             "class_type": (
                 "MiniMaxH3ReferenceToVideo"
             ),
-            "inputs": ref2va_inputs,
+            "inputs": ref_inputs,
         }
 
-        # --------------------------------------------------------
-        # CRITICAL VRAM STEP
-        #
-        # Conditioning has already been created.
-        # Release Qwen3-VL before the DiT is loaded.
-        # --------------------------------------------------------
-
+        # Free Qwen3-VL after conditioning.
         nodes["61"] = {
-            "class_type": (
-                "H3FreeTextEncoder"
-            ),
+            "class_type": "H3FreeTextEncoder",
             "inputs": {
                 "conditioning": [
                     "60",
@@ -381,10 +286,6 @@ class H3WorkflowBuilder:
             },
         }
 
-        # --------------------------------------------------------
-        # Sampling
-        # --------------------------------------------------------
-
         nodes["62"] = {
             "class_type": "RandomNoise",
             "inputs": {
@@ -395,16 +296,12 @@ class H3WorkflowBuilder:
         nodes["63"] = {
             "class_type": "KSamplerSelect",
             "inputs": {
-                "sampler_name": (
-                    "res_multistep"
-                ),
+                "sampler_name": "res_multistep",
             },
         }
 
         nodes["64"] = {
-            "class_type": (
-                "BasicScheduler"
-            ),
+            "class_type": "BasicScheduler",
             "inputs": {
                 "model": [
                     "1",
@@ -431,9 +328,7 @@ class H3WorkflowBuilder:
         }
 
         nodes["66"] = {
-            "class_type": (
-                "SamplerCustomAdvanced"
-            ),
+            "class_type": "SamplerCustomAdvanced",
             "inputs": {
                 "noise": [
                     "62",
@@ -458,10 +353,6 @@ class H3WorkflowBuilder:
             },
         }
 
-        # --------------------------------------------------------
-        # Decode video
-        # --------------------------------------------------------
-
         nodes["67"] = {
             "class_type": "VAEDecode",
             "inputs": {
@@ -476,14 +367,8 @@ class H3WorkflowBuilder:
             },
         }
 
-        # --------------------------------------------------------
-        # Decode native H3 audio
-        # --------------------------------------------------------
-
         nodes["68"] = {
-            "class_type": (
-                "VAEDecodeAudio"
-            ),
+            "class_type": "VAEDecodeAudio",
             "inputs": {
                 "samples": [
                     "66",
@@ -495,10 +380,6 @@ class H3WorkflowBuilder:
                 ],
             },
         }
-
-        # --------------------------------------------------------
-        # Mux
-        # --------------------------------------------------------
 
         nodes["69"] = {
             "class_type": "CreateVideo",
@@ -523,9 +404,7 @@ class H3WorkflowBuilder:
                     "69",
                     0,
                 ],
-                "filename_prefix": (
-                    output_prefix
-                ),
+                "filename_prefix": output_prefix,
             },
         }
 
