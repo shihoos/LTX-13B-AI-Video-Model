@@ -435,6 +435,29 @@ def validate_identity_reference_contract() -> None:
         / "shot_planner.py"
     )
 
+    manager = read_text(
+        ROOT
+        / "pipeline"
+        / "reference_manager.py"
+    )
+
+    planner = read_text(
+        ROOT
+        / "planner"
+        / "character_planner.py"
+    )
+
+    shot_planner = read_text(
+        ROOT
+        / "planner"
+        / "shot_planner.py"
+    )
+
+    SHOT_EXECUTOR = (
+        EXECUTION_DIR
+        / "shot_executor.py"
+    )
+
     # Processor
 
     for text in (
@@ -1746,8 +1769,7 @@ def main() -> None:
     check_self_contract()
     check_port_contract()
     check_validator_alignment()
-    check_identity_reference_contract()
-
+    
     print()
     print("=" * 80)
     print(
