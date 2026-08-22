@@ -17,7 +17,10 @@ class ShotExecutor:
         comfy_input_dir: Path,
     ):
         self.client = comfy_client
-        self.project_root = Path(project_root)
+        self.project_root = Path(
+            project_root
+        )
+
         self.comfy_input_dir = Path(
             comfy_input_dir
         )
@@ -28,8 +31,7 @@ class ShotExecutor:
         )
 
         self.object_info = (
-            self.client
-            .get_object_info()
+            self.client.get_object_info()
         )
 
         self.builder = (
@@ -45,11 +47,14 @@ class ShotExecutor:
         prefix: str,
     ) -> str:
 
-        source_path = Path(source)
+        source_path = Path(
+            source
+        )
 
         if not source_path.is_file():
             raise FileNotFoundError(
-                source_path
+                f"Reference file does not exist: "
+                f"{source_path}"
             )
 
         safe_name = "".join(
@@ -81,72 +86,119 @@ class ShotExecutor:
 
         parts = []
 
-        parts.extend(
-            shot.get(
-                "reference_bindings",
-                [],
-            )
-        )
+        for binding in shot.get(
+            "reference_bindings",
+            [],
+        ):
+            if str(binding).strip():
+                parts.append(
+                    str(binding)
+                )
 
-        parts.extend(
-            shot.get(
-                "identity_locks",
-                [],
-            )
-        )
+        for lock in shot.get(
+            "identity_locks",
+            [],
+        ):
+            if str(lock).strip():
+                parts.append(
+                    str(lock)
+                )
 
-        parts.extend(
-            [
-                "SHOT:",
-                str(
-                    shot.get(
-                        "visual_prompt",
-                        "",
-                    )
-                ),
-                "ACTION:",
-                str(
-                    shot.get(
-                        "action",
-                        "",
-                    )
-                ),
-                "CAMERA:",
+        visual = str(
+            shot.get(
+                "visual_prompt",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if visual:
+            parts.append(
+                visual
+            )
+
+        action = str(
+            shot.get(
+                "action",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if action:
+            parts.append(
+                "ACTION: "
+                + action
+            )
+
+        camera = " ".join(
+            value
+            for value in [
                 str(
                     shot.get(
                         "camera_shot",
                         "",
                     )
-                ),
+                    or ""
+                ).strip(),
                 str(
                     shot.get(
                         "camera_movement",
                         "",
                     )
-                ),
-                "LIGHTING:",
-                str(
-                    shot.get(
-                        "lighting",
-                        "",
-                    )
-                ),
-                "MOOD:",
-                str(
-                    shot.get(
-                        "mood",
-                        "",
-                    )
-                ),
-                "CONTINUITY:",
-                str(
-                    shot.get(
-                        "continuity_notes",
-                        "",
-                    )
-                ),
+                    or ""
+                ).strip(),
             ]
+            if value
         )
+
+        if camera:
+            parts.append(
+                "CAMERA: "
+                + camera
+            )
+
+        lighting = str(
+            shot.get(
+                "lighting",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if lighting:
+            parts.append(
+                "LIGHTING: "
+                + lighting
+            )
+
+        mood = str(
+            shot.get(
+                "mood",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if mood:
+            parts.append(
+                "MOOD: "
+                + mood
+            )
+
+        continuity = str(
+            shot.get(
+                "continuity_notes",
+                "",
+            )
+            or ""
+        ).strip()
+
+        if continuity:
+            parts.append(
+                "CONTINUITY: "
+                + continuity
+            )
 
         dialogue = str(
             shot.get(
@@ -157,11 +209,9 @@ class ShotExecutor:
         ).strip()
 
         if dialogue:
-            parts.extend(
-                [
-                    "DIALOGUE:",
-                    dialogue,
-                ]
+            parts.append(
+                "DIALOGUE: "
+                + dialogue
             )
 
         negative = str(
@@ -173,24 +223,19 @@ class ShotExecutor:
         ).strip()
 
         if negative:
-            parts.extend(
-                [
-                    "NEGATIVE:",
-                    negative,
-                ]
+            parts.append(
+                "NEGATIVE: "
+                + negative
             )
 
         return "\n".join(
-            value
-            for value in parts
-            if value.strip()
+            parts
         )
 
-    def execute_native_ref2va(
+    def _copy_references(
         self,
         shot: dict,
-        output_dir: Path,
-    ) -> Path:
+    ) -> tuple[list[str], list[str], list[str]]:
 
         image_files = [
             self._copy(
@@ -221,17 +266,17 @@ class ShotExecutor:
             )
         )
 
-        primary_voice = shot.get(
+        primary = shot.get(
             "reference_audio"
         )
 
         if (
-            primary_voice
-            and primary_voice not in audio_paths
+            primary
+            and primary not in audio_paths
         ):
             audio_paths.insert(
                 0,
-                primary_voice,
+                primary,
             )
 
         audio_files = [
@@ -242,16 +287,82 @@ class ShotExecutor:
             for path in audio_paths[:3]
         ]
 
-        seed = shot.get(
+        return (
+            image_files,
+            video_files,
+            audio_files,
+        )
+
+    @staticmethod
+    def _seed(
+        shot: dict,
+    ) -> int:
+
+        value = shot.get(
             "seed"
         )
 
-        if seed is None:
-            seed = 0
+        if value is None:
+            return 0
+
+        return int(value)
+
+    def _download_result(
+        self,
+        history: dict,
+        destination: Path,
+        label: str,
+    ) -> Path:
+
+        outputs = (
+            self.client.find_video_outputs(
+                history
+            )
+        )
+
+        if not outputs:
+            raise RuntimeError(
+                f"H3 {label} produced no video."
+            )
+
+        result = outputs[-1]
+
+        destination.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        return self.client.download_file(
+            filename=result[
+                "filename"
+            ],
+            subfolder=result[
+                "subfolder"
+            ],
+            file_type=result[
+                "type"
+            ],
+            destination=destination,
+        )
+
+    def execute_native_ref2va(
+        self,
+        shot: dict,
+        output_dir: Path,
+    ) -> Path:
+
+        (
+            image_files,
+            video_files,
+            audio_files,
+        ) = self._copy_references(
+            shot
+        )
 
         workflow = (
             self.builder
             .build_native_ref2va(
+                client=self.client,
                 prompt=self.build_prompt(
                     shot
                 ),
@@ -282,11 +393,15 @@ class ShotExecutor:
                         14,
                     )
                 ),
-                seed=int(seed),
+                seed=self._seed(
+                    shot
+                ),
                 output_prefix=(
                     "h3/ref2va/"
                     + str(
-                        shot["shot_id"]
+                        shot[
+                            "shot_id"
+                        ]
                     )
                 ),
             )
@@ -305,35 +420,105 @@ class ShotExecutor:
             )
         )
 
-        outputs = (
-            self.client.find_video_outputs(
-                history
-            )
-        )
-
-        if not outputs:
-            raise RuntimeError(
-                f"H3 Ref2VA produced no video: "
-                f"{shot['shot_id']}"
-            )
-
-        output_dir.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
         destination = (
             output_dir
             / f"{shot['shot_id']}.mp4"
         )
 
-        result = outputs[-1]
-
-        self.client.download_file(
-            filename=result["filename"],
-            subfolder=result["subfolder"],
-            file_type=result["type"],
-            destination=destination,
+        return self._download_result(
+            history,
+            destination,
+            "Ref2VA",
         )
 
-        return destination
+    def execute_hardmode_chained(
+        self,
+        shots: list[dict],
+        output_dir: Path,
+    ) -> Path:
+
+        if len(shots) < 2:
+            raise ValueError(
+                "Hard Mode Chained requires "
+                "at least two shots."
+            )
+
+        first_shot = shots[0]
+
+        (
+            image_files,
+            video_files,
+            audio_files,
+        ) = self._copy_references(
+            first_shot
+        )
+
+        workflow = (
+            self.builder
+            .build_hardmode_chained(
+                client=self.client,
+                shots=shots,
+                image_files=image_files,
+                video_files=video_files,
+                audio_files=audio_files,
+                width=int(
+                    first_shot.get(
+                        "width",
+                        960,
+                    )
+                ),
+                height=int(
+                    first_shot.get(
+                        "height",
+                        544,
+                    )
+                ),
+                frames=int(
+                    first_shot.get(
+                        "frames_per_shot",
+                        124,
+                    )
+                ),
+                steps=int(
+                    first_shot.get(
+                        "steps",
+                        14,
+                    )
+                ),
+                seed=self._seed(
+                    first_shot
+                ),
+                output_prefix=(
+                    "h3/chained/"
+                    + str(
+                        first_shot[
+                            "scene_id"
+                        ]
+                    )
+                ),
+            )
+        )
+
+        prompt_id = (
+            self.client.queue_prompt(
+                workflow
+            )
+        )
+
+        history = (
+            self.client.wait_for_prompt(
+                prompt_id,
+                timeout=14400,
+            )
+        )
+
+        destination = (
+            output_dir
+            / f"{first_shot['scene_id']}_master.mp4"
+        )
+
+        return self._download_result(
+            history,
+            destination,
+            "Hard Mode Chained",
+        )
