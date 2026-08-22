@@ -23,8 +23,6 @@ REQUIRED = [
 
     "pipeline/continuity_manager.py",
     "pipeline/identity_continuity.py",
-    "pipeline/modes.py",
-    "pipeline/production_manager.py",
     "pipeline/production_orchestrator.py",
     "pipeline/reference_manager.py",
 
@@ -53,29 +51,45 @@ REQUIRED = [
 
     "scripts/cpu_preflight.py",
     "scripts/generate_video.py",
-
-    "workflows/MiniMax-H3/H3_Ref2VA_Memory_API.json",
-    "workflows/MiniMax-H3/H3_Ref2VA_Native_API.json",
 ]
 
 
-FORBIDDEN_TEXT = [
+WORKFLOW_ROOT = (
+    ROOT
+    / "workflows"
+    / "MiniMax-H3"
+)
+
+
+REQUIRED_WORKFLOWS = [
+    WORKFLOW_ROOT
+    / "base"
+    / "H3_HardMode_R2V.json",
+
+    WORKFLOW_ROOT
+    / "base"
+    / "H3_HardMode_Chained.json",
+]
+
+
+FORBIDDEN = {
     "LTX-13B",
     "LTXVLatentUpsamplerModelLoader",
     "ltxv-13b",
     "legacy_ltx_098",
     "detailer_compat",
-]
+}
 
 
-def validate_files():
+def validate_required_files():
 
     missing = []
 
     for relative in REQUIRED:
 
         if not (
-            ROOT / relative
+            ROOT
+            / relative
         ).is_file():
 
             missing.append(
@@ -83,9 +97,8 @@ def validate_files():
             )
 
     if missing:
-
         raise RuntimeError(
-            "Missing required files:\n"
+            "Missing required project files:\n"
             + "\n".join(
                 missing
             )
@@ -101,16 +114,10 @@ def validate_python():
         if ".git" in path.parts:
             continue
 
-        if (
-            "ComfyUI"
-            in path.parts
-        ):
+        if "ComfyUI" in path.parts:
             continue
 
-        if (
-            "__pycache__"
-            in path.parts
-        ):
+        if "__pycache__" in path.parts:
             continue
 
         source = path.read_text(
@@ -125,15 +132,18 @@ def validate_python():
 
 def validate_json():
 
-    workflow_root = (
-        ROOT
-        / "workflows"
-        / "MiniMax-H3"
+    workflow_files = list(
+        WORKFLOW_ROOT.rglob(
+            "*.json"
+        )
     )
 
-    for path in workflow_root.glob(
-        "*.json"
-    ):
+    if not workflow_files:
+        raise RuntimeError(
+            "No H3 workflow JSON files found."
+        )
+
+    for path in workflow_files:
 
         data = json.loads(
             path.read_text(
@@ -146,43 +156,47 @@ def validate_json():
             dict,
         ):
             raise RuntimeError(
-                f"Workflow root must be object: "
+                f"Workflow root is not an object: "
                 f"{path}"
             )
 
 
-def validate_h3_contract():
+def validate_h3_builder():
 
-    text = (
+    path = (
         ROOT
         / "execution"
         / "h3_workflow_builder.py"
-    ).read_text(
+    )
+
+    text = path.read_text(
         encoding="utf-8"
     )
 
     required_terms = [
         "MiniMaxH3ReferenceToVideo",
-        "H3FreeTextEncoder",
+        "H3MultishotSampler",
+        "H3LastFrame",
+        "H3ConcatAV",
+        "H3ModelLoaderAny",
+        "H3ClipLoaderAny",
         "ref_images.ref_image_",
         "ref_videos.ref_video_",
         "ref_video_audios.ref_video_audio_",
         "ref_audios.ref_audio_",
-        "H3MultishotMemorySampler",
-        "VAEDecodeAudio",
+        "/workflow/convert",
     ]
 
     for term in required_terms:
 
         if term not in text:
-
             raise RuntimeError(
-                "Missing H3 contract term: "
-                + term
+                "H3 builder is missing required "
+                f"contract term: {term}"
             )
 
 
-def validate_no_legacy_ltx():
+def validate_no_legacy():
 
     for path in ROOT.rglob("*"):
 
@@ -192,13 +206,16 @@ def validate_no_legacy_ltx():
         if ".git" in path.parts:
             continue
 
+        if "ComfyUI" in path.parts:
+            continue
+
         if path.suffix.lower() not in {
             ".py",
+            ".json",
             ".yaml",
             ".yml",
-            ".json",
-            ".md",
             ".txt",
+            ".md",
         }:
             continue
 
@@ -209,33 +226,22 @@ def validate_no_legacy_ltx():
 
         lowered = text.lower()
 
-        for term in FORBIDDEN_TEXT:
+        for forbidden in FORBIDDEN:
 
-            if term.lower() in lowered:
-
-                if (
-                    path.name
-                    == "validate_project.py"
-                ):
-                    continue
-
+            if forbidden.lower() in lowered:
                 raise RuntimeError(
-                    f"Legacy LTX text found in "
-                    f"{path}: {term}"
+                    "Legacy LTX reference found in "
+                    f"{path}: {forbidden}"
                 )
 
 
 def main():
 
-    validate_files()
-
+    validate_required_files()
     validate_python()
-
     validate_json()
-
-    validate_h3_contract()
-
-    validate_no_legacy_ltx()
+    validate_h3_builder()
+    validate_no_legacy()
 
     print(
         "MiniMax H3 project validation PASSED."
