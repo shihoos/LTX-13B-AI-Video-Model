@@ -36,16 +36,24 @@ class GPUScheduler:
 
         queue = list(jobs)
 
-        lock = threading.Lock()
-        failures_lock = threading.Lock()
+        queue_lock = (
+            threading.Lock()
+        )
+
+        failure_lock = (
+            threading.Lock()
+        )
 
         failures = []
 
-        def worker(gpu_id: int):
+        def worker(
+            gpu_id: int,
+        ):
 
             while True:
 
-                with lock:
+                with queue_lock:
+
                     if not queue:
                         return
 
@@ -69,7 +77,7 @@ class GPUScheduler:
 
                     print(
                         f"[H3 GPU {gpu_id}] "
-                        f"Starting {job_id}"
+                        f"START {job_id}"
                     )
 
                     worker_function(
@@ -79,7 +87,7 @@ class GPUScheduler:
 
                     print(
                         f"[H3 GPU {gpu_id}] "
-                        f"Completed {job_id}"
+                        f"DONE {job_id}"
                     )
 
                 except Exception as error:
@@ -89,7 +97,7 @@ class GPUScheduler:
                         f"{error}"
                     )
 
-                    with failures_lock:
+                    with failure_lock:
                         failures.append(
                             (
                                 gpu_id,
@@ -101,12 +109,16 @@ class GPUScheduler:
         threads = []
 
         for gpu_id in self.gpu_ids:
-            thread = threading.Thread(
-                target=worker,
-                args=(gpu_id,),
-                name=(
-                    f"h3-gpu-{gpu_id}"
-                ),
+
+            thread = (
+                threading.Thread(
+                    target=worker,
+                    args=(gpu_id,),
+                    daemon=False,
+                    name=(
+                        f"h3-gpu-{gpu_id}"
+                    ),
+                )
             )
 
             thread.start()
