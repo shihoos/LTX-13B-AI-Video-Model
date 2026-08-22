@@ -3,173 +3,373 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
-AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".ogg", ".flac"}
+
+IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+}
+
+VIDEO_EXTENSIONS = {
+    ".mp4",
+    ".mov",
+    ".mkv",
+    ".webm",
+}
+
+AUDIO_EXTENSIONS = {
+    ".wav",
+    ".mp3",
+    ".m4a",
+    ".ogg",
+    ".flac",
+}
 
 
 class ReferenceManager:
-    """
-    H3 identity media manager.
 
-    Preferred layout:
+    MAX_IMAGES = 9
+    MAX_VIDEOS = 3
+    MAX_AUDIO = 3
 
-        assets/references/<character>/
-            images/
-                01.png
-                02.png
-                03.png
-            videos/
-                scene.mp4
-            audio/
-                voice.wav
+    def __init__(
+        self,
+        project_root: Path,
+    ):
+        self.project_root = Path(
+            project_root
+        )
 
-    Legacy single-file layout is also supported:
-        assets/characters/<character>.png
-        assets/audio/<character>.wav
-        assets/references/<character>.mp4
+        self.assets = (
+            self.project_root / "assets"
+        )
 
-    No reference images are composited together. H3 receives independent
-    reference slots so identity information is not mixed into one image.
-    """
+        self.characters_dir = (
+            self.assets / "characters"
+        )
 
-    def __init__(self, project_root: Path):
-        self.project_root = Path(project_root)
+        self.references_dir = (
+            self.assets / "references"
+        )
 
-        self.assets = self.project_root / "assets"
-        self.characters_dir = self.assets / "characters"
-        self.references_dir = self.assets / "references"
-        self.audio_dir = self.assets / "audio"
+        self.audio_dir = (
+            self.assets / "audio"
+        )
+
+        self.video_dir = (
+            self.assets / "videos"
+        )
 
         for path in (
             self.characters_dir,
             self.references_dir,
             self.audio_dir,
+            self.video_dir,
         ):
-            path.mkdir(parents=True, exist_ok=True)
+            path.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
 
     @staticmethod
-    def _key(value: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "_", value.strip().lower()).strip("_")
+    def _key(
+        value: str,
+    ) -> str:
+        return re.sub(
+            r"[^a-z0-9]+",
+            "_",
+            value.strip().lower(),
+        ).strip("_")
 
     @staticmethod
-    def _sorted_files(directory: Path, extensions: set[str]) -> list[Path]:
+    def _files(
+        directory: Path,
+        extensions: set[str],
+    ) -> list[Path]:
         if not directory.is_dir():
             return []
+
         return sorted(
-            p for p in directory.iterdir()
-            if p.is_file() and p.suffix.lower() in extensions
+            path
+            for path in directory.iterdir()
+            if (
+                path.is_file()
+                and path.suffix.lower()
+                in extensions
+            )
         )
 
-    def resolve_character(self, character_name: str) -> dict:
-        key = self._key(character_name)
+    def get_character_source(
+        self,
+        character_name: str,
+    ) -> dict:
+        result = self.resolve_character(
+            character_name
+        )
 
-        images: list[Path] = []
-        videos: list[Path] = []
-        audio: list[Path] = []
+        images = result[
+            "reference_paths"
+        ]
 
-        # Preferred directory structure.
-        ref_root = self.references_dir / key
-        images_dir = ref_root / "images"
-        videos_dir = ref_root / "videos"
-        audio_dir = ref_root / "audio"
+        videos = result[
+            "reference_video_paths"
+        ]
 
-        images.extend(self._sorted_files(images_dir, IMAGE_EXTENSIONS))
-        videos.extend(self._sorted_files(videos_dir, VIDEO_EXTENSIONS))
-        audio.extend(self._sorted_files(audio_dir, AUDIO_EXTENSIONS))
-
-        # Legacy image files in assets/characters.
-        for p in self._sorted_files(self.characters_dir, IMAGE_EXTENSIONS):
-            if self._key(p.stem) == key:
-                if p not in images:
-                    images.append(p)
-
-        # Legacy references/<character>.<ext>.
-        for p in self._sorted_files(self.references_dir, IMAGE_EXTENSIONS | VIDEO_EXTENSIONS):
-            if self._key(p.stem) == key:
-                if p.suffix.lower() in IMAGE_EXTENSIONS and p not in images:
-                    images.append(p)
-                if p.suffix.lower() in VIDEO_EXTENSIONS and p not in videos:
-                    videos.append(p)
-
-        # Legacy assets/audio/<character>.<ext>.
-        for p in self._sorted_files(self.audio_dir, AUDIO_EXTENSIONS):
-            if self._key(p.stem) == key:
-                if p not in audio:
-                    audio.append(p)
+        audio = result[
+            "reference_audio_paths"
+        ]
 
         return {
-            "reference_paths": [str(p) for p in images],
-            "reference_video_path": str(videos[0]) if videos else None,
-            "reference_audio_path": str(audio[0]) if audio else None,
+            "mode": (
+                "provided"
+                if images
+                else "missing"
+            ),
+            "path": (
+                images[0]
+                if images
+                else None
+            ),
+            "mask_path": None,
+            "reference_paths": images,
+            "reference_video_paths": videos,
+            "reference_audio_paths": audio,
+            "reference_video_path": (
+                videos[0]
+                if videos
+                else None
+            ),
+            "reference_audio_path": (
+                audio[0]
+                if audio
+                else None
+            ),
         }
 
-    def resolve_characters(self, characters: list) -> list:
+    def resolve_character(
+        self,
+        character_name: str,
+    ) -> dict:
+        key = self._key(
+            character_name
+        )
+
+        images = []
+        videos = []
+        audio = []
+
+        reference_root = (
+            self.references_dir / key
+        )
+
+        images.extend(
+            self._files(
+                reference_root / "images",
+                IMAGE_EXTENSIONS,
+            )
+        )
+
+        videos.extend(
+            self._files(
+                reference_root / "videos",
+                VIDEO_EXTENSIONS,
+            )
+        )
+
+        audio.extend(
+            self._files(
+                reference_root / "audio",
+                AUDIO_EXTENSIONS,
+            )
+        )
+
+        for path in self._files(
+            self.characters_dir,
+            IMAGE_EXTENSIONS,
+        ):
+            if self._key(
+                path.stem
+            ) == key:
+                if path not in images:
+                    images.append(path)
+
+        for path in self._files(
+            self.references_dir,
+            IMAGE_EXTENSIONS | VIDEO_EXTENSIONS,
+        ):
+            if self._key(
+                path.stem
+            ) != key:
+                continue
+
+            if (
+                path.suffix.lower()
+                in IMAGE_EXTENSIONS
+                and path not in images
+            ):
+                images.append(path)
+
+            if (
+                path.suffix.lower()
+                in VIDEO_EXTENSIONS
+                and path not in videos
+            ):
+                videos.append(path)
+
+        for path in self._files(
+            self.audio_dir,
+            AUDIO_EXTENSIONS,
+        ):
+            if self._key(
+                path.stem
+            ) == key:
+                if path not in audio:
+                    audio.append(path)
+
+        for path in self._files(
+            self.video_dir,
+            VIDEO_EXTENSIONS,
+        ):
+            if self._key(
+                path.stem
+            ) == key:
+                if path not in videos:
+                    videos.append(path)
+
+        return {
+            "reference_paths": [
+                str(path)
+                for path in images[
+                    : self.MAX_IMAGES
+                ]
+            ],
+            "reference_video_paths": [
+                str(path)
+                for path in videos[
+                    : self.MAX_VIDEOS
+                ]
+            ],
+            "reference_audio_paths": [
+                str(path)
+                for path in audio[
+                    : self.MAX_AUDIO
+                ]
+            ],
+        }
+
+    def resolve_characters(
+        self,
+        characters: list,
+    ) -> list:
         for character in characters:
-            name = getattr(character, "name", "")
-            result = self.resolve_character(name)
+            source = self.resolve_character(
+                character.name
+            )
 
-            refs = result["reference_paths"]
+            character.reference_paths = (
+                source[
+                    "reference_paths"
+                ]
+            )
 
-            # Explicit character values win.
-            existing = list(getattr(character, "reference_paths", []) or [])
-            if getattr(character, "reference_path", None):
-                existing.insert(0, character.reference_path)
+            character.reference_video_paths = (
+                source[
+                    "reference_video_paths"
+                ]
+            )
 
-            merged = []
-            for path in existing + refs:
-                if path and path not in merged:
-                    merged.append(path)
+            character.reference_audio_paths = (
+                source[
+                    "reference_audio_paths"
+                ]
+            )
 
-            character.reference_paths = merged
-            character.reference_path = merged[0] if merged else None
+            character.reference_path = (
+                character.reference_paths[0]
+                if character.reference_paths
+                else None
+            )
 
-            if not character.reference_audio_path:
-                character.reference_audio_path = result["reference_audio_path"]
+            character.reference_video_path = (
+                character.reference_video_paths[0]
+                if character.reference_video_paths
+                else None
+            )
 
-            if not character.reference_video_path:
-                character.reference_video_path = result["reference_video_path"]
+            character.reference_audio_path = (
+                character.reference_audio_paths[0]
+                if character.reference_audio_paths
+                else None
+            )
 
-            character.reference_mode = "provided" if merged else "missing"
+            character.reference_mode = (
+                "provided"
+                if character.reference_paths
+                else "missing"
+            )
+
+            character.build_identity_profile()
 
         return characters
 
-    def validate(self, characters: list, *, require_images: bool = True) -> None:
+    def validate(
+        self,
+        characters: list,
+        require_images: bool = True,
+    ) -> None:
         errors = []
 
         for character in characters:
-            refs = list(getattr(character, "reference_paths", []) or [])
-            if require_images and not refs:
+            images = (
+                character.normalized_reference_paths()
+            )
+
+            videos = (
+                character.normalized_video_paths()
+            )
+
+            audio = (
+                character.normalized_audio_paths()
+            )
+
+            if require_images and not images:
                 errors.append(
-                    f"{character.name}: no reference image found"
+                    f"{character.name}: "
+                    "no character reference image"
                 )
 
-            if len(refs) > 9:
+            if len(images) > self.MAX_IMAGES:
                 errors.append(
-                    f"{character.name}: {len(refs)} images available; "
-                    "the H3 render lane accepts at most 9 per generation."
+                    f"{character.name}: "
+                    f"more than {self.MAX_IMAGES} images"
                 )
 
-            for path in refs:
+            if len(videos) > self.MAX_VIDEOS:
+                errors.append(
+                    f"{character.name}: "
+                    f"more than {self.MAX_VIDEOS} videos"
+                )
+
+            if len(audio) > self.MAX_AUDIO:
+                errors.append(
+                    f"{character.name}: "
+                    f"more than {self.MAX_AUDIO} audio files"
+                )
+
+            for path in (
+                images
+                + videos
+                + audio
+            ):
                 if not Path(path).is_file():
                     errors.append(
-                        f"{character.name}: missing reference image: {path}"
+                        f"{character.name}: "
+                        f"missing media: {path}"
                     )
-
-            audio = getattr(character, "reference_audio_path", None)
-            if audio and not Path(audio).is_file():
-                errors.append(
-                    f"{character.name}: missing reference audio: {audio}"
-                )
-
-            video = getattr(character, "reference_video_path", None)
-            if video and not Path(video).is_file():
-                errors.append(
-                    f"{character.name}: missing reference video: {video}"
-                )
 
         if errors:
             raise RuntimeError(
-                "H3 reference validation failed:\n- "
+                "Reference validation failed:\n- "
                 + "\n- ".join(errors)
             )
