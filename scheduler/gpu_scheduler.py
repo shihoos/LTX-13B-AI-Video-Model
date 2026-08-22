@@ -5,105 +5,81 @@ import threading
 
 class GPUScheduler:
 
-    """
-    Dispatch independent shots across available GPU workers.
-
-    Each worker owns one GPU ID and consumes shots from a shared
-    queue. Worker failures are collected and returned to the caller.
-    """
-
     def __init__(
         self,
         gpu_ids=None,
     ):
-
         if gpu_ids is None:
-
             gpu_ids = [
                 0,
                 1,
             ]
 
         self.gpu_ids = [
-            int(gpu_id)
-            for gpu_id in gpu_ids
+            int(gpu)
+            for gpu in gpu_ids
         ]
 
         if not self.gpu_ids:
-
             raise ValueError(
-                "GPUScheduler requires "
-                "at least one GPU ID."
+                "At least one GPU is required."
             )
 
     def run(
         self,
-        shots: list,
+        jobs: list,
         worker_function,
     ) -> list[tuple[int, str, str]]:
 
-        if not shots:
-
+        if not jobs:
             return []
 
-        if not callable(
-            worker_function
-        ):
+        queue = list(jobs)
 
-            raise TypeError(
-                "worker_function must be callable."
-            )
-
-        queue = list(
-            shots
-        )
-
-        queue_lock = (
-            threading.Lock()
-        )
-
-        failure_lock = (
-            threading.Lock()
-        )
+        lock = threading.Lock()
+        failures_lock = threading.Lock()
 
         failures = []
 
-        def worker(
-            gpu_id: int,
-        ):
+        def worker(gpu_id: int):
 
             while True:
 
-                with queue_lock:
-
+                with lock:
                     if not queue:
                         return
 
-                    shot = queue.pop(
-                        0
-                    )
+                    job = queue.pop(0)
 
-                shot_id = getattr(
-                    shot,
-                    "shot_id",
-                    "<unknown>",
+                job_id = (
+                    getattr(
+                        job,
+                        "shot_id",
+                        None,
+                    )
+                    or
+                    getattr(
+                        job,
+                        "scene_id",
+                        "<unknown>",
+                    )
                 )
 
                 try:
 
                     print(
-                        f"[GPU {gpu_id}] "
-                        f"Starting {shot_id}"
+                        f"[H3 GPU {gpu_id}] "
+                        f"Starting {job_id}"
                     )
 
                     worker_function(
                         gpu_id,
-                        shot,
+                        job,
                     )
 
                     print(
-                        f"[GPU {gpu_id}] "
-                        f"Completed {shot_id}"
+                        f"[H3 GPU {gpu_id}] "
+                        f"Completed {job_id}"
                     )
 
                 except Exception as error:
@@ -113,20 +89,11 @@ class GPUScheduler:
                         f"{error}"
                     )
 
-                    print(
-                        f"[GPU {gpu_id}] "
-                        f"FAILED {shot_id}: "
-                        f"{message}"
-                    )
-
-                    with failure_lock:
-
+                    with failures_lock:
                         failures.append(
                             (
                                 gpu_id,
-                                str(
-                                    shot_id
-                                ),
+                                str(job_id),
                                 message,
                             )
                         )
@@ -134,28 +101,20 @@ class GPUScheduler:
         threads = []
 
         for gpu_id in self.gpu_ids:
-
-            thread = (
-                threading.Thread(
-                    target=worker,
-                    args=(
-                        gpu_id,
-                    ),
-                    daemon=False,
-                    name=(
-                        f"ltx-gpu-{gpu_id}"
-                    ),
-                )
+            thread = threading.Thread(
+                target=worker,
+                args=(gpu_id,),
+                name=(
+                    f"h3-gpu-{gpu_id}"
+                ),
             )
 
+            thread.start()
             threads.append(
                 thread
             )
 
-            thread.start()
-
         for thread in threads:
-
             thread.join()
 
         return failures
