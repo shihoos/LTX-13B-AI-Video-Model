@@ -6,6 +6,9 @@ from pathlib import Path
 from execution.shot_executor import (
     ShotExecutor,
 )
+from scheduler.gpu_scheduler import (
+    GPUScheduler,
+)
 
 
 class ProductionRunner:
@@ -13,17 +16,17 @@ class ProductionRunner:
     def __init__(
         self,
         project_root: Path,
-        comfy_client,
+        comfy_clients: dict[int, object],
     ):
-        self.project_root = (
-            Path(project_root)
+        self.project_root = Path(
+            project_root
         )
 
-        self.client = (
-            comfy_client
+        self.clients = dict(
+            comfy_clients
         )
 
-        self.comfy_input_dir = (
+        self.comfy_input_root = (
             self.project_root
             / "ComfyUI"
             / "input"
@@ -41,22 +44,64 @@ class ProductionRunner:
             exist_ok=True,
         )
 
+    def _generate_one(
+        self,
+        gpu_id: int,
+        shot: dict,
+    ) -> Path:
+
+        client = self.clients[
+            gpu_id
+        ]
+
+        executor = (
+            ShotExecutor(
+                comfy_client=client,
+                project_root=(
+                    self.project_root
+                ),
+                comfy_input_dir=(
+                    self.comfy_input_root
+                    / f"gpu_{gpu_id}"
+                ),
+            )
+        )
+
+        native = (
+            int(
+                shot.get(
+                    "order",
+                    1,
+                )
+            )
+            == 1
+        )
+
+        return executor.execute(
+            shot=shot,
+            output_dir=(
+                self.output_dir
+                / f"gpu_{gpu_id}"
+            ),
+            native_ref2va=native,
+        )
+
     @staticmethod
     def _concat(
-        files: list[Path],
+        videos: list[Path],
         destination: Path,
     ) -> Path:
 
         manifest = (
-            destination.with_suffix(
-                ".txt"
-            )
+            destination
+            .with_suffix(".txt")
         )
 
         manifest.write_text(
             "\n".join(
-                f"file '{path.resolve()}'"
-                for path in files
+                "file "
+                f"'{video.resolve()}'"
+                for video in videos
             )
             + "\n",
             encoding="utf-8",
@@ -71,20 +116,8 @@ class ProductionRunner:
             "0",
             "-i",
             str(manifest),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "17",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-movflags",
-            "+faststart",
+            "-c",
+            "copy",
             str(destination),
         ]
 
@@ -101,7 +134,7 @@ class ProductionRunner:
 
         if result.returncode != 0:
             raise RuntimeError(
-                "FFmpeg assembly failed:\n"
+                "FFmpeg concat failed:\n"
                 + result.stderr[-4000:]
             )
 
@@ -161,93 +194,97 @@ class ProductionRunner:
         production_plan: dict,
     ) -> Path:
 
-        if not self.client.health_check():
+        if not self.clients:
             raise RuntimeError(
-                "Cannot connect to ComfyUI at "
-                f"{self.client.base_url}"
+                "No ComfyUI GPU workers "
+                "were configured."
             )
 
-        shots = production_plan.get(
-            "shots",
-            [],
+        shots = list(
+            production_plan.get(
+                "shots",
+                [],
+            )
         )
 
         if not shots:
             raise ValueError(
-                "Production plan contains no shots."
+                "No shots in production plan."
             )
 
-        executor = (
-            ShotExecutor(
-                comfy_client=self.client,
-                project_root=self.project_root,
-                comfy_input_dir=(
-                    self.comfy_input_dir
-                ),
+        failures = []
+
+        if len(
+            self.clients
+        ) == 1:
+
+            gpu_id = next(
+                iter(
+                    self.clients
+                )
+            )
+
+            for shot in shots:
+                try:
+                    self._generate_one(
+                        gpu_id,
+                        shot,
+                    )
+                except Exception as error:
+                    failures.append(
+                        (
+                            gpu_id,
+                            shot["shot_id"],
+                            str(error),
+                        )
+                    )
+
+        else:
+
+            scheduler = (
+                GPUScheduler(
+                    gpu_ids=list(
+                        self.clients
+                    )
+                )
+            )
+
+            failures = (
+                scheduler.run(
+                    shots,
+                    self._generate_one,
+                )
+            )
+
+        if failures:
+            raise RuntimeError(
+                "H3 generation failures:\n"
+                + "\n".join(
+                    str(item)
+                    for item in failures
+                )
+            )
+
+        generated = sorted(
+            self.output_dir.rglob(
+                "*.mp4"
             )
         )
 
-        scene_outputs = {}
-
-        for shot in shots:
-            scene_id = shot[
-                "scene_id"
-            ]
-
-            print(
-                f"Generating "
-                f"{shot['shot_id']} "
-                f"with existing H3 workflow..."
+        if not generated:
+            raise RuntimeError(
+                "No H3 output videos were found."
             )
 
-            video = executor.execute(
-                shot,
-                self.output_dir,
-            )
+        master = (
+            self.output_dir
+            / "master.mp4"
+        )
 
-            scene_outputs.setdefault(
-                scene_id,
-                [],
-            ).append(
-                video
-            )
-
-        mastered_scenes = []
-
-        for scene_id, files in (
-            scene_outputs.items()
-        ):
-            if len(files) == 1:
-                master = files[0]
-            else:
-                master = (
-                    self.output_dir
-                    / f"{scene_id}_master.mp4"
-                )
-
-                self._concat(
-                    files,
-                    master,
-                )
-
-            mastered_scenes.append(
-                master
-            )
-
-        if len(
-            mastered_scenes
-        ) == 1:
-            master = mastered_scenes[0]
-        else:
-            master = (
-                self.output_dir
-                / "h3_master.mp4"
-            )
-
-            self._concat(
-                mastered_scenes,
-                master,
-            )
+        self._concat(
+            generated,
+            master,
+        )
 
         final = (
             self.project_root
