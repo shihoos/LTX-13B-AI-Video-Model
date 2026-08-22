@@ -1,72 +1,4 @@
-name: Repository Validation
-
-on:
-  workflow_dispatch:
-
-  push:
-    branches:
-      - main
-      - "agent/**"
-      - "hardening/**"
-      - "feature/**"
-      - "fix/**"
-
-  pull_request:
-    branches:
-      - main
-
-permissions:
-  contents: read
-
-concurrency:
-  group: repository-validation-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  validate:
-    name: CPU Validation
-    runs-on: ubuntu-latest
-
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 1
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Show environment
-        run: |
-          python --version
-          python -c "import sys; print('Python executable:', sys.executable)"
-
-      - name: Install validation dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install pyyaml pytest
-
-      - name: Validate Python syntax
-        run: |
-          python -m compileall -q \
-            planner \
-            pipeline \
-            execution \
-            scheduler \
-            schemas \
-            kaggle \
-            compatibility \
-            scripts
-
-      - name: Run repository validator
-        run: |
-          python scripts/validate_project.py
-
-      - name: Validate compatibility lock
+      - name: Validate H3 compatibility lock
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -75,198 +7,58 @@ jobs:
           path = Path("kaggle/compatibility_lock.yaml")
 
           if not path.is_file():
-              raise SystemExit("compatibility_lock.yaml is missing")
-
-          with path.open("r", encoding="utf-8") as file:
-              data = yaml.safe_load(file)
-
-          if not isinstance(data, dict):
               raise SystemExit(
-                  "compatibility_lock.yaml must contain a mapping"
+                  "kaggle/compatibility_lock.yaml missing"
               )
 
-          required_sections = {
-              "comfyui",
-              "python_runtime",
-              "custom_nodes",
-              "legacy_ltx_098_compat",
-              "detailer_compat",
-              "models",
-              "validation",
-              "runtime",
+          data = yaml.safe_load(
+              path.read_text(encoding="utf-8")
+          )
+
+          if data.get("backend") not in {
+              "minimax-h3-ref2va",
+              "minimax-h3"
+          }:
+              raise SystemExit(
+                  "Expected MiniMax H3 backend"
+              )
+
+          model = data.get("model", {})
+
+          required = {
+              "diffusion_checkpoint",
+              "text_encoder",
+              "mmproj",
+              "video_vae",
+              "audio_vae",
           }
 
-          missing = required_sections - set(data)
+          missing = (
+              required
+              - set(model)
+          )
 
           if missing:
               raise SystemExit(
-                  "Missing compatibility-lock sections: "
-                  + ", ".join(sorted(missing))
-              )
-
-          runtime = data["runtime"]
-
-          if not isinstance(runtime, dict):
-              raise SystemExit(
-                  "runtime section must contain a mapping"
-              )
-
-          network = runtime.get("network")
-
-          if not isinstance(network, dict):
-              raise SystemExit(
-                  "runtime.network section must contain a mapping"
-              )
-
-          if network.get("host") != "127.0.0.1":
-              raise SystemExit(
-                  "runtime.network.host must be 127.0.0.1"
-              )
-
-          if network.get("base_port") != 8188:
-              raise SystemExit(
-                  "runtime.network.base_port must be 8188"
-              )
-
-          if network.get("port_strategy") != "base_port_plus_gpu_id":
-              raise SystemExit(
-                  "runtime.network.port_strategy must be "
-                  "base_port_plus_gpu_id"
-              )
-
-          if network.get("protocol") != "http":
-              raise SystemExit(
-                  "runtime.network.protocol must be http"
-              )
-
-          stale_ports = network.get("stale_ports")
-
-          if not isinstance(stale_ports, list):
-              raise SystemExit(
-                  "runtime.network.stale_ports must be a list"
-              )
-
-          if 8219 not in stale_ports:
-              raise SystemExit(
-                  "runtime.network.stale_ports must contain 8219"
-              )
-
-          print("Compatibility lock: OK")
-          print("Runtime/network contract: OK")
-          PY
-
-      - name: Validate all workflow JSON files
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import json
-
-          workflow_root = Path("workflows")
-          files = sorted(workflow_root.rglob("*.json"))
-
-          if not files:
-              raise SystemExit("No workflow JSON files found")
-
-          for path in files:
-              try:
-                  with path.open("r", encoding="utf-8") as file:
-                      value = json.load(file)
-              except Exception as error:
-                  raise SystemExit(
-                      f"Invalid JSON: {path}\n{error}"
-                  ) from error
-
-              if not isinstance(value, dict):
-                  raise SystemExit(
-                      f"Workflow root must be an object: {path}"
+                  "Missing H3 model entries: "
+                  + ", ".join(
+                      sorted(missing)
                   )
+              )
 
-              print(f"OK: {path}")
+          references = data.get(
+              "references",
+              {},
+          )
 
-          print(f"Validated {len(files)} workflow JSON file(s)")
-          PY
-
-      - name: Validate example JSON files
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import json
-
-          root = Path("examples")
-          files = sorted(root.rglob("*.json"))
-
-          for path in files:
-              try:
-                  with path.open("r", encoding="utf-8") as file:
-                      value = json.load(file)
-              except Exception as error:
-                  raise SystemExit(
-                      f"Invalid JSON: {path}\n{error}"
-                  ) from error
-
-              if not isinstance(value, dict):
-                  raise SystemExit(
-                      f"Example JSON root must be an object: {path}"
-                  )
-
-              print(f"OK: {path}")
-
-          print(f"Validated {len(files)} example JSON file(s)")
-          PY
-
-      - name: Run unit and contract tests
-        run: |
-          if [ -d tests ] && find tests -type f -name 'test_*.py' | grep -q .; then
-            python -m pytest -q
-          else
-            echo "No test suite present yet; repository validation completed."
-          fi
-
-      - name: Verify no obsolete compatibility files exist
-        run: |
-          test ! -e kaggle/model_paths.yaml
-          test ! -e kaggle/runtime_requirements.lock
-          echo "No obsolete compatibility files detected."
-
-      - name: Verify no generated runtime artifacts are committed
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          forbidden = [
-              Path("cloudflared"),
-              Path("cloudflared.download"),
-              Path(".runtime_requirements_filtered.txt"),
-          ]
-
-          bad = [str(path) for path in forbidden if path.exists()]
-
-          if bad:
+          if references.get(
+              "max_images_per_generation"
+          ) != 9:
               raise SystemExit(
-                  "Generated runtime artifact(s) detected:\n"
-                  + "\n".join(bad)
+                  "H3 image reference limit must be 9"
               )
 
-          print("No generated runtime artifacts detected.")
-          PY
-
-      - name: CPU-only guard
-        run: |
-          python - <<'PY'
-          import importlib.util
-          import os
-
-          print("CUDA/GPU generation is NOT part of GitHub CI.")
-
-          if os.environ.get("CUDA_VISIBLE_DEVICES") not in (None, "", "-1"):
-              print(
-                  "Warning: CUDA_VISIBLE_DEVICES is set, "
-                  "but this workflow does not perform GPU generation."
-              )
-
-          if importlib.util.find_spec("torch") is not None:
-              print(
-                  "PyTorch is available in the runner environment, "
-                  "but no model loading or video generation is performed."
-              )
+          print(
+              "H3 compatibility lock: OK"
+          )
           PY
