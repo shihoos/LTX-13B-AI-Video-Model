@@ -2,21 +2,13 @@ from __future__ import annotations
 
 
 class IdentityContinuity:
-    """
-    H3 replacement for the identity-preservation responsibility
-    that previously depended on LTX-specific conditioning.
-
-    This layer does not pretend to be IC-LoRA.
-
-    It converts the existing structured character identity data
-    into deterministic H3 conditioning text and negative guards.
-    """
 
     @staticmethod
     def build_locks(
         characters: list,
         shot_characters: list[str],
     ) -> list[str]:
+
         by_name = {
             character.name.lower(): character
             for character in characters
@@ -25,6 +17,7 @@ class IdentityContinuity:
         locks = []
 
         for name in shot_characters:
+
             character = by_name.get(
                 str(name).lower()
             )
@@ -36,6 +29,15 @@ class IdentityContinuity:
                 character.identity_lock_text()
             )
 
+            state_text = (
+                character.story_state_text()
+            )
+
+            if state_text:
+                locks.append(
+                    state_text
+                )
+
         return locks
 
     @staticmethod
@@ -43,9 +45,13 @@ class IdentityContinuity:
         image_paths: list[str],
         character_bindings: dict[str, list[str]],
     ) -> list[str]:
+
         reverse = {}
 
-        for character_name, paths in character_bindings.items():
+        for character_name, paths in (
+            character_bindings.items()
+        ):
+
             for path in paths:
                 reverse.setdefault(
                     str(path),
@@ -60,21 +66,26 @@ class IdentityContinuity:
             image_paths,
             start=1,
         ):
+
             names = reverse.get(
                 str(image_path),
                 [],
             )
 
-            if names:
-                result.append(
-                    (
-                        f"<Picture {index}> is the canonical "
-                        f"identity reference for "
-                        f"{', '.join(names)}. "
-                        "Preserve that character's face, hair, "
-                        "body proportions and distinctive features."
-                    )
+            if not names:
+                continue
+
+            result.append(
+                (
+                    f"<Picture {index}> is the "
+                    f"canonical visual identity reference "
+                    f"for {', '.join(names)}. "
+                    "Use this reference specifically for "
+                    "face, hair, hairline, body structure, "
+                    "body proportions and stable identity "
+                    "features."
                 )
+            )
 
         return result
 
@@ -85,6 +96,7 @@ class IdentityContinuity:
         bindings: list[str],
         negative_prompt: str,
     ) -> tuple[str, str]:
+
         positive_parts = []
 
         positive_parts.extend(
@@ -97,23 +109,35 @@ class IdentityContinuity:
 
         if visual_prompt.strip():
             positive_parts.append(
-                "SHOT DIRECTION: "
-                + visual_prompt.strip()
+                visual_prompt.strip()
             )
 
-        positive = " ".join(
-            item
-            for item in positive_parts
-            if item.strip()
+        positive = "\n".join(
+            part
+            for part in positive_parts
+            if str(part).strip()
         )
 
+        # H3 does not expose a conventional negative
+        # conditioning socket. Keep this as a textual
+        # production guard for our planner/export layer.
         negative = (
-            negative_prompt.strip()
-            + ", identity drift, different face, "
-              "different hairstyle, different hairline, "
-              "different body proportions, altered skin tone, "
-              "different distinctive marks, facial deformation, "
-              "duplicate person, extra limbs, anatomy drift"
-        ).strip(" ,")
+            str(
+                negative_prompt or ""
+            ).strip()
+        )
 
-        return positive, negative
+        if negative:
+            negative += "\n"
+
+        negative += (
+            "Avoid identity drift, altered face geometry, "
+            "different hairstyle, different hairline, "
+            "different body proportions, altered skin tone, "
+            "facial deformation, extra limbs, duplicate person."
+        )
+
+        return (
+            positive,
+            negative,
+        )
