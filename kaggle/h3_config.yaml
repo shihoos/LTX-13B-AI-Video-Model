@@ -20,11 +20,11 @@ generation:
   ref_image_size: match
 
 references:
-  images: 9
-  videos: 3
-  paired_video_audio: 3
-  standalone_audio: 3
-  total_assets: 12
+  max_images: 9
+  max_videos: 3
+  max_video_audio: 3
+  max_audio: 3
+  composite_reference: false
 
 identity:
   structured_profile: true
@@ -33,26 +33,35 @@ identity:
   body: true
   skin_tone: true
   clothing: true
+  accessories: true
   distinctive_features: true
+  character_state: true
   continuity_rules: true
-  composite_reference: false
 
-memory:
-  enabled: true
+continuity:
   first_shot: native_ref2va
-  continuation: h3_multishot_memory
+  later_shots: h3_memory
+  last_frame_anchor: true
 
 offload:
   qwen_planner_unload_before_h3: true
   h3_text_encoder_eviction: true
-  cpu_system_ram_offload: true
+  cpu_vae: true
+  lowvram: true
 
 multi_gpu:
   enabled: true
   mode: scene_parallel
-  worker_0_port: 8188
-  worker_1_port: 8189
+  base_port: 8188
+  workers:
+    - gpu: 0
+      port: 8188
+    - gpu: 1
+      port: 8189
 
 delivery:
   width: 1280
   height: 720
+  fps: 24
+  codec: h264
+  audio_codec: aac
