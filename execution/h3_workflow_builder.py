@@ -1,274 +1,531 @@
 from __future__ import annotations
 
-import copy
-import json
-import re
 from pathlib import Path
 from typing import Any
 
 
 class H3WorkflowBuilder:
     """
-    Builds an H3-Multishot Ref2VA API graph from the current ComfyUI /object_info.
+    Builds the actual API graph for MiniMax H3 Ref2VA Q4.
 
-    The graph intentionally avoids hard-coding custom-node widget names where
-    ComfyUI exposes them dynamically. The H3-Multishot pack provides:
-      H3ModelLoaderAny
-      H3ClipLoaderAny
-      H3MultishotMemorySampler
-      H3ReferenceAudio
+    Architecture:
 
-    Reference inputs are linked only when actually provided.
+        H3ModelLoaderAny
+              +
+        H3ClipLoaderAny
+              +
+             VAEs
+              +
+        reference images
+        reference videos
+        reference audio
+              +
+    MiniMaxH3ReferenceToVideo
+              |
+        H3FreeTextEncoder
+              |
+        BasicGuider
+              |
+        SamplerCustomAdvanced
+              |
+        VAEDecode / VAEDecodeAudio
+              |
+        CreateVideo
+              |
+        SaveVideo
+
+    The first shot is native Ref2VA.
+
+    Continuation shots are handled separately by
+    H3MultishotMemorySampler.
     """
+
+    MODEL = (
+        "minimax_h3_ref2va_pruned-Q4_K_M.gguf"
+    )
+
+    CLIP = (
+        "qwen3vl_32b_minimax_h3-Q4_K_M.gguf"
+    )
+
+    VIDEO_VAE = (
+        "minimax_h3_video_vae_fp16.safetensors"
+    )
+
+    AUDIO_VAE = (
+        "minimax_h3_audio_vae_fp32.safetensors"
+    )
 
     def __init__(
         self,
         project_root: Path,
         object_info: dict[str, Any],
     ):
-        self.project_root = Path(project_root)
+        self.project_root = Path(
+            project_root
+        )
         self.object_info = object_info
 
-    def _node_info(self, class_type: str) -> dict:
-        info = self.object_info.get(class_type)
-        if not isinstance(info, dict):
-            raise RuntimeError(
-                f"Required ComfyUI node is unavailable: {class_type}"
-            )
-        return info
-
-    def _make_model_loader(self, node_id: str, filename: str) -> dict:
-        self._node_info("H3ModelLoaderAny")
-        return {
-            "class_type": "H3ModelLoaderAny",
-            "inputs": self._best_model_input(
-                "H3ModelLoaderAny",
-                filename,
-                type_value="minimax",
-            ),
-        }
-
-    def _best_model_input(
+    def _require_node(
         self,
         class_type: str,
-        filename: str,
-        type_value: str | None = None,
-    ) -> dict:
-        info = self._node_info(class_type)
-        required = info.get("input", {}).get("required", {})
+    ) -> None:
 
-        result: dict[str, Any] = {}
+        if class_type not in self.object_info:
+            raise RuntimeError(
+                "Required ComfyUI node is not "
+                f"available: {class_type}"
+            )
 
-        # H3ModelLoaderAny/H3ClipLoaderAny currently use a model filename
-        # combo and H3's type selector. Handle common name variants.
-        model_key = None
-        for key in ("model_name", "model", "checkpoint", "ckpt_name"):
-            if key in required:
-                model_key = key
-                break
-
-        if model_key:
-            result[model_key] = filename
-        else:
-            # Fall back to the first non-type required widget.
-            for key in required:
-                if key not in ("type", "device", "weight_dtype"):
-                    result[key] = filename
-                    break
-
-        if type_value is not None and "type" in required:
-            result["type"] = type_value
-
-        return result
-
-    def _add_image_loader(
+    def _require_runtime(
         self,
-        nodes: dict,
-        node_id: str,
-        filename: str,
-    ):
-        nodes[node_id] = {
-            "class_type": "LoadImage",
-            "inputs": {"image": filename},
-        }
-        return [node_id, 0]
+    ) -> None:
 
-    @staticmethod
-    def _add_batch(
-        nodes: dict,
-        node_id: str,
-        left,
-        right,
-    ):
-        nodes[node_id] = {
-            "class_type": "ImageBatch",
-            "inputs": {
-                "image1": left,
-                "image2": right,
-            },
-        }
-        return [node_id, 0]
-
-    def build(
-        self,
-        *,
-        script: str,
-        image_files: list[str],
-        voice_audio: str | None,
-        reference_video: str | None,
-        width: int,
-        height: int,
-        frames_per_shot: int,
-        steps: int,
-        output_prefix: str,
-    ) -> dict:
-        for required_node in (
+        required = [
             "H3ModelLoaderAny",
             "H3ClipLoaderAny",
-            "H3MultishotMemorySampler",
+            "MiniMaxH3ReferenceToVideo",
+            "H3FreeTextEncoder",
             "H3ReferenceAudio",
             "VAELoader",
+            "VAEDecode",
+            "VAEDecodeAudio",
+            "RandomNoise",
+            "BasicGuider",
+            "KSamplerSelect",
+            "BasicScheduler",
+            "SamplerCustomAdvanced",
             "CreateVideo",
             "SaveVideo",
-        ):
-            self._node_info(required_node)
+        ]
+
+        for node in required:
+            self._require_node(node)
+
+    @staticmethod
+    def _image_node(
+        node_id: str,
+        filename: str,
+    ) -> dict:
+
+        return {
+            "class_type": "LoadImage",
+            "inputs": {
+                "image": filename,
+            },
+        }
+
+    @staticmethod
+    def _audio_node(
+        node_id: str,
+        filename: str,
+    ) -> dict:
+
+        return {
+            "class_type": "LoadAudio",
+            "inputs": {
+                "audio": filename,
+            },
+        }
+
+    @staticmethod
+    def _video_node(
+        node_id: str,
+        filename: str,
+    ) -> dict:
+
+        return {
+            "class_type": "VHS_LoadVideo",
+            "inputs": {
+                "video": filename,
+                "force_rate": 24,
+                "custom_width": 0,
+                "custom_height": 0,
+                "frame_load_cap": 0,
+                "skip_first_frames": 0,
+                "select_every_nth": 1,
+            },
+        }
+
+    def build_native_ref2va(
+        self,
+        *,
+        prompt: str,
+        image_files: list[str],
+        video_files: list[str],
+        audio_files: list[str],
+        width: int,
+        height: int,
+        frames: int,
+        steps: int,
+        seed: int,
+        output_prefix: str,
+        ref_image_size: str = "match",
+    ) -> dict:
+
+        self._require_runtime()
+
+        if len(image_files) > 9:
+            raise ValueError(
+                "MiniMax H3 Ref2VA supports at most "
+                "9 reference images."
+            )
+
+        if len(video_files) > 3:
+            raise ValueError(
+                "MiniMax H3 Ref2VA supports at most "
+                "3 reference videos."
+            )
+
+        if len(audio_files) > 3:
+            raise ValueError(
+                "MiniMax H3 Ref2VA supports at most "
+                "3 standalone audio references."
+            )
 
         nodes: dict[str, dict] = {}
 
-        # ------------------------------------------------------------
-        # Model / encoder / VAEs.
-        # ------------------------------------------------------------
-        nodes["1"] = self._make_model_loader(
-            "1",
-            "minimax_h3_ref2va_pruned-Q4_K_M.gguf",
-        )
+        nodes["1"] = {
+            "class_type": "H3ModelLoaderAny",
+            "inputs": {
+                "model_name": self.MODEL,
+            },
+        }
 
         nodes["2"] = {
             "class_type": "H3ClipLoaderAny",
-            "inputs": self._best_model_input(
-                "H3ClipLoaderAny",
-                "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
-                type_value="minimax",
-            ),
+            "inputs": {
+                "model_name": self.CLIP,
+                "type": "minimax",
+            },
         }
 
         nodes["3"] = {
             "class_type": "VAELoader",
             "inputs": {
-                "vae_name": "minimax_h3_video_vae_fp16.safetensors",
+                "vae_name": self.VIDEO_VAE,
             },
         }
 
         nodes["4"] = {
             "class_type": "VAELoader",
             "inputs": {
-                "vae_name": "minimax_h3_audio_vae_fp32.safetensors",
+                "vae_name": self.AUDIO_VAE,
             },
         }
 
-        # ------------------------------------------------------------
-        # References.
-        # ------------------------------------------------------------
-        reference_link = None
-        if image_files:
-            image_files = image_files[:9]
-            first = self._add_image_loader(nodes, "10", image_files[0])
-            reference_link = first
+        # --------------------------------------------------------
+        # Reference images
+        # --------------------------------------------------------
 
-            next_id = 11
-            for index, filename in enumerate(image_files[1:], start=1):
-                current = self._add_image_loader(
-                    nodes,
-                    str(next_id),
+        for index, filename in enumerate(
+            image_files[:9]
+        ):
+            node_id = str(
+                10 + index
+            )
+
+            nodes[node_id] = (
+                self._image_node(
+                    node_id,
                     filename,
                 )
-                reference_link = self._add_batch(
-                    nodes,
-                    str(next_id + 20),
-                    reference_link,
-                    current,
+            )
+
+        # --------------------------------------------------------
+        # Reference videos
+        # --------------------------------------------------------
+
+        for index, filename in enumerate(
+            video_files[:3]
+        ):
+            node_id = str(
+                30 + index
+            )
+
+            nodes[node_id] = (
+                self._video_node(
+                    node_id,
+                    filename,
                 )
-                next_id += 1
+            )
 
-        voice_link = None
-        if voice_audio:
-            nodes["50"] = {
-                "class_type": "LoadAudio",
-                "inputs": {"audio": voice_audio},
-            }
-            nodes["51"] = {
-                "class_type": "H3ReferenceAudio",
-                "inputs": {"audio": ["50", 0]},
-            }
-            voice_link = ["51", 0]
+        # --------------------------------------------------------
+        # Standalone reference audio
+        # --------------------------------------------------------
 
-        video_link = None
-        video_audio_link = None
-        if reference_video:
-            self._node_info("VHS_LoadVideo")
-            nodes["60"] = {
-                "class_type": "VHS_LoadVideo",
+        for index, filename in enumerate(
+            audio_files[:3]
+        ):
+            load_id = str(
+                40 + index
+            )
+
+            ref_id = str(
+                50 + index
+            )
+
+            nodes[load_id] = (
+                self._audio_node(
+                    load_id,
+                    filename,
+                )
+            )
+
+            nodes[ref_id] = {
+                "class_type": (
+                    "H3ReferenceAudio"
+                ),
                 "inputs": {
-                    "video": reference_video,
-                    "force_rate": 2,
-                    "custom_width": 0,
-                    "custom_height": 0,
-                    "frame_load_cap": 48,
-                    "skip_first_frames": 0,
-                    "select_every_nth": 1,
+                    "audio": [
+                        load_id,
+                        0,
+                    ],
+                    "max_seconds": 10.0,
                 },
             }
-            video_link = ["60", 0]
-            video_audio_link = ["60", 2]
 
-        # ------------------------------------------------------------
-        # H3 Memory Sampler.
-        # ------------------------------------------------------------
-        sampler_inputs: dict[str, Any] = {
-            "model": ["1", 0],
-            "clip": ["2", 0],
-            "video_vae": ["3", 0],
-            "audio_vae": ["4", 0],
-            "script": script,
-            "shot_count": 0,
+        # --------------------------------------------------------
+        # Native H3 Ref2VA
+        # --------------------------------------------------------
+
+        ref2va_inputs = {
+            "clip": [
+                "2",
+                0,
+            ],
+            "vae": [
+                "3",
+                0,
+            ],
+            "audio_vae": [
+                "4",
+                0,
+            ],
+            "prompt": prompt,
             "width": int(width),
             "height": int(height),
-            "frames_per_shot": int(frames_per_shot),
-            "steps": int(steps),
+            "length": int(frames),
+            "ref_image_size": (
+                ref_image_size
+            ),
         }
 
-        if reference_link:
-            sampler_inputs["reference_images"] = reference_link
+        for index in range(
+            min(len(image_files), 9)
+        ):
+            ref2va_inputs[
+                f"ref_images.ref_image_{index}"
+            ] = [
+                str(10 + index),
+                0,
+            ]
 
-        if voice_link:
-            sampler_inputs["voice_ref"] = voice_link
+        for index in range(
+            min(len(video_files), 3)
+        ):
+            ref2va_inputs[
+                f"ref_videos.ref_video_{index}"
+            ] = [
+                str(30 + index),
+                0,
+            ]
 
-        if video_link:
-            sampler_inputs["reference_video"] = video_link
+            # VHS_LoadVideo output 2 is AUDIO.
+            ref2va_inputs[
+                "ref_video_audios."
+                f"ref_video_audio_{index}"
+            ] = [
+                str(30 + index),
+                2,
+            ]
 
-        if video_audio_link:
-            sampler_inputs["reference_video_audio"] = video_audio_link
+        for index in range(
+            min(len(audio_files), 3)
+        ):
+            ref2va_inputs[
+                "ref_audios."
+                f"ref_audio_{index}"
+            ] = [
+                str(50 + index),
+                0,
+            ]
 
-        nodes["70"] = {
-            "class_type": "H3MultishotMemorySampler",
-            "inputs": sampler_inputs,
+        nodes["60"] = {
+            "class_type": (
+                "MiniMaxH3ReferenceToVideo"
+            ),
+            "inputs": ref2va_inputs,
         }
 
-        nodes["80"] = {
+        # --------------------------------------------------------
+        # CRITICAL VRAM STEP
+        #
+        # Conditioning has already been created.
+        # Release Qwen3-VL before the DiT is loaded.
+        # --------------------------------------------------------
+
+        nodes["61"] = {
+            "class_type": (
+                "H3FreeTextEncoder"
+            ),
+            "inputs": {
+                "conditioning": [
+                    "60",
+                    0,
+                ],
+                "clip": [
+                    "2",
+                    0,
+                ],
+            },
+        }
+
+        # --------------------------------------------------------
+        # Sampling
+        # --------------------------------------------------------
+
+        nodes["62"] = {
+            "class_type": "RandomNoise",
+            "inputs": {
+                "noise_seed": int(seed),
+            },
+        }
+
+        nodes["63"] = {
+            "class_type": "KSamplerSelect",
+            "inputs": {
+                "sampler_name": (
+                    "res_multistep"
+                ),
+            },
+        }
+
+        nodes["64"] = {
+            "class_type": (
+                "BasicScheduler"
+            ),
+            "inputs": {
+                "model": [
+                    "1",
+                    0,
+                ],
+                "scheduler": "beta",
+                "steps": int(steps),
+                "denoise": 1.0,
+            },
+        }
+
+        nodes["65"] = {
+            "class_type": "BasicGuider",
+            "inputs": {
+                "model": [
+                    "1",
+                    0,
+                ],
+                "conditioning": [
+                    "61",
+                    0,
+                ],
+            },
+        }
+
+        nodes["66"] = {
+            "class_type": (
+                "SamplerCustomAdvanced"
+            ),
+            "inputs": {
+                "noise": [
+                    "62",
+                    0,
+                ],
+                "guider": [
+                    "65",
+                    0,
+                ],
+                "sampler": [
+                    "63",
+                    0,
+                ],
+                "sigmas": [
+                    "64",
+                    0,
+                ],
+                "latent_image": [
+                    "60",
+                    1,
+                ],
+            },
+        }
+
+        # --------------------------------------------------------
+        # Decode video
+        # --------------------------------------------------------
+
+        nodes["67"] = {
+            "class_type": "VAEDecode",
+            "inputs": {
+                "samples": [
+                    "66",
+                    0,
+                ],
+                "vae": [
+                    "3",
+                    0,
+                ],
+            },
+        }
+
+        # --------------------------------------------------------
+        # Decode native H3 audio
+        # --------------------------------------------------------
+
+        nodes["68"] = {
+            "class_type": (
+                "VAEDecodeAudio"
+            ),
+            "inputs": {
+                "samples": [
+                    "66",
+                    0,
+                ],
+                "vae": [
+                    "4",
+                    0,
+                ],
+            },
+        }
+
+        # --------------------------------------------------------
+        # Mux
+        # --------------------------------------------------------
+
+        nodes["69"] = {
             "class_type": "CreateVideo",
             "inputs": {
-                "images": ["70", 0],
-                "audio": ["70", 1],
+                "images": [
+                    "67",
+                    0,
+                ],
+                "audio": [
+                    "68",
+                    0,
+                ],
                 "frame_rate": 24,
                 "loop_count": 1,
             },
         }
 
-        nodes["81"] = {
+        nodes["70"] = {
             "class_type": "SaveVideo",
             "inputs": {
-                "video": ["80", 0],
-                "filename_prefix": output_prefix,
+                "video": [
+                    "69",
+                    0,
+                ],
+                "filename_prefix": (
+                    output_prefix
+                ),
             },
         }
 
