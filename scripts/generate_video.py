@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 from __future__ import annotations
 
 import argparse
@@ -7,39 +5,54 @@ import json
 import sys
 from pathlib import Path
 
-PROJECT_ROOT = (
+
+ROOT = (
     Path(__file__)
     .resolve()
     .parents[1]
 )
 
-if str(PROJECT_ROOT) not in sys.path:
+if str(ROOT) not in sys.path:
     sys.path.insert(
         0,
-        str(PROJECT_ROOT)
+        str(ROOT),
     )
 
-from execution.comfy_client import (
-    ComfyClient,
-)
-from execution.production_runner import (
-    ProductionRunner,
-)
-from pipeline.production_manager import (
-    ProductionManager,
-)
-from pipeline.production_orchestrator import (
-    ProductionOrchestrator,
-)
+
+def load_clients(
+    urls: list[str],
+) -> dict:
+
+    from execution.comfy_client import (
+        ComfyClient,
+    )
+
+    clients = {}
+
+    for index, url in enumerate(
+        urls
+    ):
+
+        client = (
+            ComfyClient(
+                base_url=url.rstrip("/")
+            )
+        )
+
+        if not client.health_check():
+            raise RuntimeError(
+                f"ComfyUI worker unavailable: "
+                f"{url}"
+            )
+
+        clients[index] = client
+
+    return clients
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description=(
-            "MiniMax H3 Ref2VA "
-            "production generator"
-        )
-    )
+
+    parser = argparse.ArgumentParser()
 
     parser.add_argument(
         "--story",
@@ -57,24 +70,30 @@ def main():
     )
 
     parser.add_argument(
-        "--gpu-url",
-        default=(
-            "http://127.0.0.1:8188"
-        ),
+        "--worker",
+        action="append",
+        default=[
+            "http://127.0.0.1:8188",
+        ],
     )
 
     parser.add_argument(
-        "--output-json",
-        type=Path,
+        "--plan-only",
+        action="store_true",
     )
 
     args = parser.parse_args()
+
+    from pipeline.production_orchestrator import (
+        ProductionOrchestrator,
+    )
 
     orchestrator = (
         ProductionOrchestrator()
     )
 
     try:
+
         plan = (
             orchestrator
             .create_production_plan(
@@ -82,69 +101,56 @@ def main():
                 user_input=args.story,
             )
         )
+
     finally:
+
         orchestrator.unload_models()
 
-    manager = (
-        ProductionManager()
+    plan_path = (
+        plan.get(
+            "production_plan_path"
+        )
     )
 
-    print(
-        "\nPipeline:"
-    )
-
-    for stage in (
-        manager.get_pipeline()
-    ):
+    if plan_path:
         print(
-            "  ->",
-            stage,
+            "PLAN:",
+            plan_path,
         )
 
-    client = (
-        ComfyClient(
-            base_url=(
-                args.gpu_url.rstrip("/")
-            )
-        )
+    if args.plan_only:
+        return
+
+    clients = load_clients(
+        args.worker
+    )
+
+    from execution.production_runner import (
+        ProductionRunner,
     )
 
     runner = (
         ProductionRunner(
-            project_root=PROJECT_ROOT,
-            comfy_client=client,
+            project_root=ROOT,
+            comfy_clients=clients,
         )
     )
 
-    final_video = (
+    final = (
         runner.run(
             plan
         )
     )
-
-    if (
-        not final_video.is_file()
-        or final_video.stat().st_size <= 0
-    ):
-        raise RuntimeError(
-            "Generation completed but "
-            "the final video is empty."
-        )
 
     result = {
         "status": "completed",
         "backend": (
             "minimax-h3-ref2va-q4"
         ),
-        "final_video": str(
-            final_video
+        "video": str(
+            final
         ),
-        "production_plan": (
-            plan.get(
-                "production_plan_path"
-            )
-        ),
-        "shot_count": len(
+        "shots": len(
             plan.get(
                 "shots",
                 [],
@@ -152,35 +158,11 @@ def main():
         ),
     }
 
-    if args.output_json:
-        args.output_json.parent.mkdir(
-            parents=True,
-            exist_ok=True,
+    print(
+        json.dumps(
+            result,
+            indent=2,
         )
-
-        args.output_json.write_text(
-            json.dumps(
-                result,
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-
-    print(
-        "\n"
-        + "=" * 70
-    )
-
-    print(
-        "H3 GENERATION COMPLETE"
-    )
-
-    print(
-        "=" * 70
-    )
-
-    print(
-        final_video
     )
 
 
