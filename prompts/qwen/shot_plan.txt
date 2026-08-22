@@ -1,73 +1,113 @@
-Create a production shot plan optimized for MiniMax H3 Ref2VA.
+Create the shot plan for the supplied scene.
 
-The generator supports:
-- up to 9 independent reference images in one H3 scene chain
-- one primary reference video per scene chain
-- one primary voice-reference audio lane per scene chain
-- 24 fps
-- 960x544 base generation, later delivered at 1280x720
+STORY:
 
-Do NOT describe a reference image as the literal opening frame. References are identity/appearance conditioning.
+{story}
 
-For every shot return:
-- duration_seconds (the application will normalize to the H3 scene-chain frame count)
-- characters
-- speaking_characters
-- speech_text
-- location
-- action
-- camera_shot
-- camera_movement
-- lighting
-- mood
-- visual_prompt
-- negative_prompt
-- continuity_notes
-- seed
+CHARACTERS:
 
-Reference instructions:
-- Keep visual identity in the reference media and let the story control clothing, environment and action.
-- Mention each relevant character by name.
-- Do not invent clothing from the reference image when the story specifies different clothing.
-- Do not invent the reference background as the scene background.
-- Make camera and environment explicit.
-- When dialogue exists, identify exactly one primary speaking character for the voice reference lane.
-- Do not put two different shots into one visual_prompt. Each shot is separated by the production system.
-- The system may include independent reference-image binding text such as:
-  "<Picture 1>, <Picture 2> are reference images of CHARACTER_A."
-- Never ask for a composite reference image.
+{characters}
 
-Return ONLY JSON:
+SCENE:
+
+{scene}
+
+PREVIOUS CONTINUITY:
+
+{continuity_context}
+
+Return ONLY valid JSON.
+
+Structure:
 
 {
   "shots": [
     {
       "duration_seconds": 5.0,
-      "characters": ["Character A"],
-      "speaking_characters": ["Character A"],
-      "speech_text": "Exact dialogue, or empty string.",
-      "location": "Where the shot occurs.",
-      "action": "What happens.",
-      "camera_shot": "Camera framing.",
-      "camera_movement": "Camera movement.",
-      "lighting": "Lighting.",
-      "mood": "Mood.",
-      "visual_prompt": "Complete H3 visual prompt.",
-      "negative_prompt": "Undesired visual/audio qualities.",
-      "continuity_notes": "Continuity from the previous shot.",
+
+      "characters": [],
+      "speaking_characters": [],
+
+      "action": "",
+      "location": "",
+
+      "camera_shot": "",
+      "camera_movement": "",
+
+      "lighting": "",
+      "mood": "",
+
+      "visual_prompt": "",
+
+      "retention_analysis": "",
+
+      "detailed_description": "",
+
+      "overall_soundscape": "",
+
+      "non_diegetic_music": "",
+
+      "speech_text": "",
+
+      "continuity_notes": "",
+
       "seed": null
     }
   ]
 }
 
-STORY:
-{story}
+SHOT RULES:
 
-CHARACTERS:
-{characters}
+Each shot should represent one clear cinematic beat.
 
-SCENE:
-{scene}
+Do not cram unrelated actions into one shot.
 
-CONTINUITY:
-{continuity_context}
+Use the same character identity established in the character data.
+
+REFERENCE IDENTITY:
+
+Reference images establish:
+- face
+- hair
+- hairline
+- body structure
+- body proportions
+- stable identity features
+
+Do not change these.
+
+QWEN MAY DETERMINE:
+
+- clothing
+- environment
+- lighting
+- props
+- scars
+- injuries
+- emotional state
+- temporary physical state
+
+But these must remain consistent once introduced.
+
+A new scar or injury may only appear when logically introduced by the story.
+
+CAMERA:
+
+Describe:
+- shot size
+- angle
+- camera movement
+- subject framing
+
+AUDIO:
+
+Describe:
+- dialogue
+- voice delivery
+- ambience
+- effects
+- music
+
+Dialogue should be represented clearly.
+
+Do not invent dialogue when the story does not require it.
