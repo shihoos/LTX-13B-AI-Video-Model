@@ -6,8 +6,8 @@ from pathlib import Path
 from execution.shot_executor import (
     ShotExecutor,
 )
-from scheduler.gpu_scheduler import (
-    GPUScheduler,
+from pipeline.h3_scene_continuity import (
+    H3SceneContinuity,
 )
 
 
@@ -26,82 +26,152 @@ class ProductionRunner:
             comfy_clients
         )
 
-        self.comfy_input_root = (
+        self.input_root = (
             self.project_root
             / "ComfyUI"
             / "input"
         )
 
-        self.output_dir = (
+        self.output_root = (
             self.project_root
             / "data"
             / "production"
             / "h3"
         )
 
-        self.output_dir.mkdir(
+        self.output_root.mkdir(
             parents=True,
             exist_ok=True,
         )
 
-    def _generate_one(
+        self.continuity = (
+            H3SceneContinuity(
+                self.project_root
+            )
+        )
+
+    def run_scene(
         self,
         gpu_id: int,
-        shot: dict,
+        scene_id: str,
+        shots: list[dict],
     ) -> Path:
 
-        client = self.clients[
-            gpu_id
-        ]
-
-        executor = (
-            ShotExecutor(
-                comfy_client=client,
-                project_root=(
-                    self.project_root
-                ),
-                comfy_input_dir=(
-                    self.comfy_input_root
-                    / f"gpu_{gpu_id}"
-                ),
+        if gpu_id not in self.clients:
+            raise RuntimeError(
+                f"GPU worker {gpu_id} is not configured."
             )
+
+        client = self.clients[gpu_id]
+
+        input_dir = (
+            self.input_root
+            / f"gpu_{gpu_id}"
+            / str(scene_id)
         )
 
-        native = (
-            int(
-                shot.get(
-                    "order",
-                    1,
+        output_dir = (
+            self.output_root
+            / f"gpu_{gpu_id}"
+            / str(scene_id)
+        )
+
+        input_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        output_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        rendered: list[Path] = []
+
+        previous_last_frame = None
+
+        for index, shot in enumerate(
+            shots
+        ):
+
+            # The first shot is the identity-casting
+            # native Ref2VA shot.
+            if index != 0:
+                # The next-stage interface keeps the previous
+                # frame available to the scene manager.
+                # The actual H3 chained workflow consumes it.
+                if previous_last_frame:
+                    shot = dict(shot)
+                    shot[
+                        "continuity_start_image"
+                    ] = str(
+                        previous_last_frame
+                    )
+
+            executor = (
+                ShotExecutor(
+                    comfy_client=client,
+                    project_root=self.project_root,
+                    comfy_input_dir=input_dir,
                 )
             )
-            == 1
+
+            result = (
+                executor
+                .execute_native_ref2va(
+                    shot=shot,
+                    output_dir=output_dir,
+                )
+            )
+
+            rendered.append(
+                result
+            )
+
+            previous_last_frame = (
+                self.continuity
+                .prepare_next_shot(
+                    video_path=result,
+                    scene_id=scene_id,
+                    shot_id=shot[
+                        "shot_id"
+                    ],
+                )
+            )
+
+        scene_master = (
+            output_dir
+            / f"{scene_id}.mp4"
         )
 
-        return executor.execute(
-            shot=shot,
-            output_dir=(
-                self.output_dir
-                / f"gpu_{gpu_id}"
-            ),
-            native_ref2va=native,
+        self.concat(
+            rendered,
+            scene_master,
         )
+
+        return scene_master
 
     @staticmethod
-    def _concat(
+    def concat(
         videos: list[Path],
         destination: Path,
     ) -> Path:
 
+        if not videos:
+            raise ValueError(
+                "No video files supplied."
+            )
+
         manifest = (
-            destination
-            .with_suffix(".txt")
+            destination.with_suffix(
+                ".txt"
+            )
         )
 
         manifest.write_text(
             "\n".join(
-                "file "
-                f"'{video.resolve()}'"
-                for video in videos
+                f"file '{path.resolve()}'"
+                for path in videos
             )
             + "\n",
             encoding="utf-8",
@@ -141,7 +211,7 @@ class ProductionRunner:
         return destination
 
     @staticmethod
-    def _deliver_720p(
+    def upscale_720p(
         source: Path,
         destination: Path,
     ) -> Path:
@@ -183,7 +253,7 @@ class ProductionRunner:
 
         if result.returncode != 0:
             raise RuntimeError(
-                "720p delivery failed:\n"
+                "720p export failed:\n"
                 + result.stderr[-4000:]
             )
 
@@ -194,95 +264,70 @@ class ProductionRunner:
         production_plan: dict,
     ) -> Path:
 
-        if not self.clients:
-            raise RuntimeError(
-                "No ComfyUI GPU workers "
-                "were configured."
-            )
-
-        shots = list(
-            production_plan.get(
-                "shots",
-                [],
-            )
+        shots = production_plan.get(
+            "shots",
+            [],
         )
 
         if not shots:
-            raise ValueError(
-                "No shots in production plan."
-            )
-
-        failures = []
-
-        if len(
-            self.clients
-        ) == 1:
-
-            gpu_id = next(
-                iter(
-                    self.clients
-                )
-            )
-
-            for shot in shots:
-                try:
-                    self._generate_one(
-                        gpu_id,
-                        shot,
-                    )
-                except Exception as error:
-                    failures.append(
-                        (
-                            gpu_id,
-                            shot["shot_id"],
-                            str(error),
-                        )
-                    )
-
-        else:
-
-            scheduler = (
-                GPUScheduler(
-                    gpu_ids=list(
-                        self.clients
-                    )
-                )
-            )
-
-            failures = (
-                scheduler.run(
-                    shots,
-                    self._generate_one,
-                )
-            )
-
-        if failures:
             raise RuntimeError(
-                "H3 generation failures:\n"
-                + "\n".join(
-                    str(item)
-                    for item in failures
-                )
+                "Production plan contains no shots."
             )
 
-        generated = sorted(
-            self.output_dir.rglob(
-                "*.mp4"
+        scenes: dict[str, list[dict]] = {}
+
+        for shot in shots:
+            scenes.setdefault(
+                str(
+                    shot["scene_id"]
+                ),
+                [],
+            ).append(
+                shot
             )
+
+        gpu_ids = list(
+            self.clients
         )
 
-        if not generated:
+        if not gpu_ids:
             raise RuntimeError(
-                "No H3 output videos were found."
+                "No GPU workers configured."
+            )
+
+        scene_masters = []
+
+        for scene_index, (
+            scene_id,
+            scene_shots,
+        ) in enumerate(
+            scenes.items()
+        ):
+
+            gpu_id = gpu_ids[
+                scene_index
+                % len(gpu_ids)
+            ]
+
+            master = (
+                self.run_scene(
+                    gpu_id=gpu_id,
+                    scene_id=scene_id,
+                    shots=scene_shots,
+                )
+            )
+
+            scene_masters.append(
+                master
             )
 
         master = (
-            self.output_dir
-            / "master.mp4"
+            self.output_root
+            / "master_native.mp4"
         )
 
-        self._concat(
-            generated,
+        self.concat(
+            scene_masters,
             master,
         )
 
@@ -293,7 +338,7 @@ class ProductionRunner:
             / "final_h3_720p.mp4"
         )
 
-        return self._deliver_720p(
-            master,
-            final,
+        return self.upscale_720p(
+            source=master,
+            destination=final,
         )
