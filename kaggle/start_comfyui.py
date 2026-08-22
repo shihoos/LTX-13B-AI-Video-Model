@@ -14,30 +14,22 @@ ROOT = (
     .parents[1]
 )
 
-COMFY = (
-    ROOT
-    / "ComfyUI"
-)
-
-LOG_ROOT = (
-    ROOT
-    / "data"
-    / "comfy_logs"
-)
+COMFY = ROOT / "ComfyUI"
+LOGS = ROOT / "data" / "comfy_logs"
 
 
-def start_worker(
+def start(
     gpu_id: int,
     port: int,
 ):
 
-    LOG_ROOT.mkdir(
+    LOGS.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     logfile = (
-        LOG_ROOT
+        LOGS
         / f"gpu_{gpu_id}.log"
     )
 
@@ -53,29 +45,22 @@ def start_worker(
         "expandable_segments:True"
     )
 
-    command = [
-        sys.executable,
-        "main.py",
-        "--listen",
-        "127.0.0.1",
-        "--port",
-        str(port),
-        "--lowvram",
-        "--cpu-vae",
-    ]
-
-    print(
-        f"Starting H3 GPU worker "
-        f"{gpu_id} on port {port}"
-    )
-
     handle = logfile.open(
         "a",
         encoding="utf-8",
     )
 
     process = subprocess.Popen(
-        command,
+        [
+            sys.executable,
+            "main.py",
+            "--listen",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--lowvram",
+            "--cpu-vae",
+        ],
         cwd=str(COMFY),
         env=env,
         stdout=handle,
@@ -83,76 +68,61 @@ def start_worker(
         text=True,
     )
 
-    return (
-        process,
-        handle,
-    )
+    return process, handle
 
 
 def main():
 
     workers = [
-        (
-            0,
-            8188,
-        ),
-        (
-            1,
-            8189,
-        ),
+        (0, 8188),
+        (1, 8189),
     ]
 
-    processes = []
-
-    for gpu_id, port in workers:
-
-        processes.append(
-            start_worker(
-                gpu_id,
-                port,
-            )
+    processes = [
+        start(
+            gpu_id,
+            port,
         )
+        for gpu_id, port
+        in workers
+    ]
 
     print(
-        "\nWorkers:"
+        "MiniMax H3 workers started:"
     )
 
     for index, (
         process,
-        handle,
-    ) in enumerate(processes):
+        _handle,
+    ) in enumerate(
+        processes
+    ):
 
         print(
             f"GPU {index}: "
-            f"PID {process.pid}"
+            f"PID={process.pid} "
+            f"PORT={8188 + index}"
         )
 
     try:
 
         while True:
 
-            alive = False
-
-            for process, _handle in processes:
-
-                if process.poll() is None:
-                    alive = True
-
-            if not alive:
+            if not any(
+                process.poll()
+                is None
+                for process, _handle
+                in processes
+            ):
                 break
 
-            time.sleep(3)
+            time.sleep(2)
 
     except KeyboardInterrupt:
-
-        print(
-            "\nStopping H3 workers..."
-        )
 
         for process, handle in processes:
 
             if process.poll() is None:
-
                 process.send_signal(
                     signal.SIGTERM
                 )
