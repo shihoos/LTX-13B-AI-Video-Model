@@ -17,11 +17,7 @@ class ShotExecutor:
         comfy_input_dir: Path,
     ):
         self.client = comfy_client
-
-        self.project_root = Path(
-            project_root
-        )
-
+        self.project_root = Path(project_root)
         self.comfy_input_dir = Path(
             comfy_input_dir
         )
@@ -38,24 +34,18 @@ class ShotExecutor:
 
         self.builder = (
             H3WorkflowBuilder(
-                project_root=(
-                    self.project_root
-                ),
-                object_info=(
-                    self.object_info
-                ),
+                project_root=self.project_root,
+                object_info=self.object_info,
             )
         )
 
-    def _copy_input(
+    def _copy(
         self,
         source: str,
         prefix: str,
     ) -> str:
 
-        source_path = Path(
-            source
-        )
+        source_path = Path(source)
 
         if not source_path.is_file():
             raise FileNotFoundError(
@@ -69,8 +59,7 @@ class ShotExecutor:
                 or char in "._-"
             )
             else "_"
-            for char
-            in source_path.name
+            for char in source_path.name
         )
 
         destination = (
@@ -86,7 +75,7 @@ class ShotExecutor:
         return destination.name
 
     @staticmethod
-    def _prompt(
+    def build_prompt(
         shot: dict,
     ) -> str:
 
@@ -106,80 +95,60 @@ class ShotExecutor:
             )
         )
 
-        parts.append(
-            "TARGET SHOT:"
+        parts.extend(
+            [
+                "SHOT:",
+                str(
+                    shot.get(
+                        "visual_prompt",
+                        "",
+                    )
+                ),
+                "ACTION:",
+                str(
+                    shot.get(
+                        "action",
+                        "",
+                    )
+                ),
+                "CAMERA:",
+                str(
+                    shot.get(
+                        "camera_shot",
+                        "",
+                    )
+                ),
+                str(
+                    shot.get(
+                        "camera_movement",
+                        "",
+                    )
+                ),
+                "LIGHTING:",
+                str(
+                    shot.get(
+                        "lighting",
+                        "",
+                    )
+                ),
+                "MOOD:",
+                str(
+                    shot.get(
+                        "mood",
+                        "",
+                    )
+                ),
+                "CONTINUITY:",
+                str(
+                    shot.get(
+                        "continuity_notes",
+                        "",
+                    )
+                ),
+            ]
         )
 
-        parts.append(
-            shot.get(
-                "visual_prompt",
-                "",
-            )
-        )
-
-        parts.append(
-            "ACTION:"
-        )
-
-        parts.append(
-            shot.get(
-                "action",
-                "",
-            )
-        )
-
-        parts.append(
-            "CAMERA:"
-        )
-
-        parts.append(
-            shot.get(
-                "camera_shot",
-                "",
-            )
-        )
-
-        parts.append(
-            shot.get(
-                "camera_movement",
-                "",
-            )
-        )
-
-        parts.append(
-            "LIGHTING:"
-        )
-
-        parts.append(
-            shot.get(
-                "lighting",
-                "",
-            )
-        )
-
-        parts.append(
-            "MOOD:"
-        )
-
-        parts.append(
-            shot.get(
-                "mood",
-                "",
-            )
-        )
-
-        parts.append(
-            "CONTINUITY:"
-        )
-
-        parts.append(
-            shot.get(
-                "continuity_notes",
-                "",
-            )
-        )
-
-        speech = str(
+        dialogue = str(
             shot.get(
                 "speech_text",
                 "",
@@ -187,11 +156,11 @@ class ShotExecutor:
             or ""
         ).strip()
 
-        if speech:
+        if dialogue:
             parts.extend(
                 [
                     "DIALOGUE:",
-                    speech,
+                    dialogue,
                 ]
             )
 
@@ -212,40 +181,37 @@ class ShotExecutor:
             )
 
         return "\n".join(
-            str(part)
-            for part in parts
-            if str(part).strip()
+            value
+            for value in parts
+            if value.strip()
         )
 
-    def _native_workflow(
+    def execute_native_ref2va(
         self,
         shot: dict,
-    ) -> dict:
+        output_dir: Path,
+    ) -> Path:
 
         image_files = [
-            self._copy_input(
+            self._copy(
                 path,
-                "ref_image",
+                "reference_image",
             )
-            for path in (
-                shot.get(
-                    "reference_images",
-                    [],
-                )[:9]
-            )
+            for path in shot.get(
+                "reference_images",
+                [],
+            )[:9]
         ]
 
         video_files = [
-            self._copy_input(
+            self._copy(
                 path,
-                "ref_video",
+                "reference_video",
             )
-            for path in (
-                shot.get(
-                    "reference_videos",
-                    [],
-                )[:3]
-            )
+            for path in shot.get(
+                "reference_videos",
+                [],
+            )[:3]
         ]
 
         audio_paths = list(
@@ -255,23 +221,23 @@ class ShotExecutor:
             )
         )
 
-        voice = shot.get(
+        primary_voice = shot.get(
             "reference_audio"
         )
 
         if (
-            voice
-            and voice not in audio_paths
+            primary_voice
+            and primary_voice not in audio_paths
         ):
             audio_paths.insert(
                 0,
-                voice,
+                primary_voice,
             )
 
         audio_files = [
-            self._copy_input(
+            self._copy(
                 path,
-                "ref_audio",
+                "reference_audio",
             )
             for path in audio_paths[:3]
         ]
@@ -283,10 +249,10 @@ class ShotExecutor:
         if seed is None:
             seed = 0
 
-        return (
+        workflow = (
             self.builder
             .build_native_ref2va(
-                prompt=self._prompt(
+                prompt=self.build_prompt(
                     shot
                 ),
                 image_files=image_files,
@@ -318,169 +284,13 @@ class ShotExecutor:
                 ),
                 seed=int(seed),
                 output_prefix=(
-                    "h3/native/"
+                    "h3/ref2va/"
                     + str(
-                        shot[
-                            "shot_id"
-                        ]
+                        shot["shot_id"]
                     )
                 ),
             )
         )
-
-    def _memory_workflow(
-        self,
-        shot: dict,
-    ) -> dict:
-
-        workflow = {
-            "1": {
-                "class_type": (
-                    "H3ModelLoaderAny"
-                ),
-                "inputs": {
-                    "model_name": (
-                        "minimax_h3_ref2va_"
-                        "pruned-Q4_K_M.gguf"
-                    )
-                },
-            },
-            "2": {
-                "class_type": (
-                    "H3ClipLoaderAny"
-                ),
-                "inputs": {
-                    "model_name": (
-                        "qwen3vl_32b_minimax_h3_"
-                        "Q4_K_M.gguf"
-                    ),
-                    "type": "minimax",
-                },
-            },
-            "3": {
-                "class_type": "VAELoader",
-                "inputs": {
-                    "vae_name": (
-                        "minimax_h3_video_vae_"
-                        "fp16.safetensors"
-                    )
-                },
-            },
-            "4": {
-                "class_type": "VAELoader",
-                "inputs": {
-                    "vae_name": (
-                        "minimax_h3_audio_vae_"
-                        "fp32.safetensors"
-                    )
-                },
-            },
-            "70": {
-                "class_type": (
-                    "H3MultishotMemorySampler"
-                ),
-                "inputs": {
-                    "model": [
-                        "1",
-                        0,
-                    ],
-                    "clip": [
-                        "2",
-                        0,
-                    ],
-                    "video_vae": [
-                        "3",
-                        0,
-                    ],
-                    "audio_vae": [
-                        "4",
-                        0,
-                    ],
-                    "script": (
-                        self._prompt(
-                            shot
-                        )
-                    ),
-                    "shot_count": 1,
-                    "width": int(
-                        shot.get(
-                            "width",
-                            960,
-                        )
-                    ),
-                    "height": int(
-                        shot.get(
-                            "height",
-                            544,
-                        )
-                    ),
-                    "frames_per_shot": int(
-                        shot.get(
-                            "frames_per_shot",
-                            124,
-                        )
-                    ),
-                    "steps": int(
-                        shot.get(
-                            "steps",
-                            14,
-                        )
-                    ),
-                },
-            },
-            "80": {
-                "class_type": "CreateVideo",
-                "inputs": {
-                    "images": [
-                        "70",
-                        0,
-                    ],
-                    "audio": [
-                        "70",
-                        1,
-                    ],
-                    "frame_rate": 24,
-                    "loop_count": 1,
-                },
-            },
-            "81": {
-                "class_type": "SaveVideo",
-                "inputs": {
-                    "video": [
-                        "80",
-                        0,
-                    ],
-                    "filename_prefix": (
-                        "h3/memory/"
-                        + str(
-                            shot["shot_id"]
-                        )
-                    ),
-                },
-            },
-        }
-
-        return workflow
-
-    def execute(
-        self,
-        shot: dict,
-        output_dir: Path,
-        native_ref2va: bool = True,
-    ) -> Path:
-
-        if native_ref2va:
-            workflow = (
-                self._native_workflow(
-                    shot
-                )
-            )
-        else:
-            workflow = (
-                self._memory_workflow(
-                    shot
-                )
-            )
 
         prompt_id = (
             self.client.queue_prompt(
@@ -503,7 +313,7 @@ class ShotExecutor:
 
         if not outputs:
             raise RuntimeError(
-                f"No H3 video returned for "
+                f"H3 Ref2VA produced no video: "
                 f"{shot['shot_id']}"
             )
 
@@ -520,15 +330,9 @@ class ShotExecutor:
         result = outputs[-1]
 
         self.client.download_file(
-            filename=result[
-                "filename"
-            ],
-            subfolder=result[
-                "subfolder"
-            ],
-            file_type=result[
-                "type"
-            ],
+            filename=result["filename"],
+            subfolder=result["subfolder"],
+            file_type=result["type"],
             destination=destination,
         )
 
