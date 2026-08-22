@@ -1061,25 +1061,25 @@ def validate_workflows() -> None:
     )
 
     require(
-       "LTXICLoRALoaderModelOnly"
-       in base_types,
-       "BASE workflow is missing "
-       "LTXICLoRALoaderModelOnly.",
+        "LTXICLoRALoaderModelOnly"
+        in base_types,
+        "BASE workflow is missing "
+        "LTXICLoRALoaderModelOnly.",
     )
 
     require(
-       "LTXAddVideoICLoRAGuideAdvanced"
-       in base_types,
-       "BASE workflow is missing "
-       "LTXAddVideoICLoRAGuideAdvanced.",
-   )
+        "LTXAddVideoICLoRAGuideAdvanced"
+        in base_types,
+        "BASE workflow is missing "
+        "LTXAddVideoICLoRAGuideAdvanced.",
+    )
 
-   require(
-       "LoadImage"
-       in base_types,
-       "BASE workflow is missing "
-       "LoadImage nodes.",
-   )
+    require(
+        "LoadImage"
+        in base_types,
+        "BASE workflow is missing "
+        "LoadImage nodes.",
+    )
 
     # ------------------------------------------------------------------------
     # BASE workflow
