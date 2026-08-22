@@ -28,23 +28,21 @@ class QwenStoryModel:
         self.model_id = model_id
         self.model = None
         self.tokenizer = None
-
         self.model_path = (
             self._resolve_model_path()
         )
 
     def _resolve_model_path(self):
+
         required = (
             "config.json",
             "model.safetensors.index.json",
         )
 
-        candidates = [
+        for root in (
             QWEN_KAGGLE_PATH,
             QWEN_LOCAL_PATH,
-        ]
-
-        for root in candidates:
+        ):
 
             if not root.is_dir():
                 continue
@@ -60,31 +58,26 @@ class QwenStoryModel:
             for config in root.rglob(
                 "config.json"
             ):
-                model_dir = (
+
+                candidate = (
                     config.parent
                 )
 
                 if (
-                    model_dir
+                    candidate
                     / "model.safetensors.index.json"
                 ).is_file():
-                    return model_dir
+
+                    return candidate
 
         raise FileNotFoundError(
-            "Qwen model not found."
+            "Qwen planner model was not found."
         )
 
     def load(self):
 
         if self.model is not None:
             return
-
-        print(
-            "Loading Qwen planner:"
-        )
-        print(
-            self.model_path
-        )
 
         self.tokenizer = (
             AutoTokenizer.from_pretrained(
@@ -108,8 +101,12 @@ class QwenStoryModel:
     def generate(
         self,
         messages: list,
-        max_new_tokens=QWEN_MAX_NEW_TOKENS,
-        temperature=QWEN_STORY_TEMPERATURE,
+        max_new_tokens=(
+            QWEN_MAX_NEW_TOKENS
+        ),
+        temperature=(
+            QWEN_STORY_TEMPERATURE
+        ),
         top_p=QWEN_TOP_P,
     ) -> str:
 
@@ -150,8 +147,11 @@ class QwenStoryModel:
         }
 
         if temperature <= 0:
+
             kwargs["do_sample"] = False
+
         else:
+
             kwargs.update(
                 {
                     "do_sample": True,
@@ -161,6 +161,7 @@ class QwenStoryModel:
             )
 
         with torch.inference_mode():
+
             output = (
                 self.model.generate(
                     **kwargs
@@ -183,10 +184,6 @@ class QwenStoryModel:
 
     def unload(self):
 
-        print(
-            "Releasing Qwen before H3..."
-        )
-
         if self.model is not None:
             del self.model
             self.model = None
@@ -198,18 +195,18 @@ class QwenStoryModel:
         gc.collect()
 
         if torch.cuda.is_available():
+
             for device_id in range(
                 torch.cuda.device_count()
             ):
+
                 with torch.cuda.device(
                     device_id
                 ):
+
                     torch.cuda.empty_cache()
+
                     try:
                         torch.cuda.ipc_collect()
                     except Exception:
                         pass
-
-        print(
-            "Qwen completely released."
-        )
