@@ -11,6 +11,7 @@ class H3Runtime:
 
     @staticmethod
     def clear_cuda():
+
         try:
             import torch
 
@@ -22,9 +23,11 @@ class H3Runtime:
             for device_id in range(
                 torch.cuda.device_count()
             ):
+
                 with torch.cuda.device(
                     device_id
                 ):
+
                     torch.cuda.empty_cache()
 
                     try:
@@ -37,8 +40,8 @@ class H3Runtime:
 
     @staticmethod
     def worker_environment(
-        gpu_id: int,
-    ) -> dict[str, str]:
+        gpu_id,
+    ):
 
         env = os.environ.copy()
 
@@ -80,28 +83,43 @@ class H3Runtime:
             [
                 "python",
                 "main.py",
+
                 "--listen",
                 "127.0.0.1",
+
                 "--port",
                 str(port),
+
                 "--lowvram",
+
                 "--cpu-vae",
             ],
-            cwd=str(comfy_root),
-            env=H3Runtime.worker_environment(
-                gpu_id
+
+            cwd=str(
+                comfy_root
             ),
+
+            env=(
+                H3Runtime
+                .worker_environment(
+                    gpu_id
+                )
+            ),
+
             stdout=handle,
             stderr=subprocess.STDOUT,
             text=True,
         )
 
-        return process, handle
+        return (
+            process,
+            handle,
+        )
 
     @staticmethod
     def wait_http(
-        url: str,
-        timeout: int = 300,
+        url,
+        timeout=300,
     ):
 
         import urllib.request
@@ -109,11 +127,13 @@ class H3Runtime:
         started = time.time()
 
         while (
-            time.time() - started
+            time.time()
+            - started
             < timeout
         ):
 
             try:
+
                 with urllib.request.urlopen(
                     url,
                     timeout=5,
