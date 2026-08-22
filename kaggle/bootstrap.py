@@ -5,24 +5,19 @@ import sys
 from pathlib import Path
 
 
-PROJECT_ROOT = (
+ROOT = (
     Path(__file__)
     .resolve()
     .parents[1]
 )
 
-COMFY_ROOT = (
-    PROJECT_ROOT
-    / "ComfyUI"
-)
-
-CUSTOM_ROOT = (
-    COMFY_ROOT
-    / "custom_nodes"
-)
+COMFY = ROOT / "ComfyUI"
+CUSTOM = COMFY / "custom_nodes"
 
 
-def run(*args: str) -> None:
+def run(
+    *args: str,
+) -> None:
 
     print(
         "+",
@@ -53,7 +48,7 @@ def clone(
     )
 
 
-def find_h3_dataset() -> Path:
+def find_dataset() -> Path:
 
     marker = (
         "minimax_h3_ref2va_pruned-Q4_K_M.gguf"
@@ -68,29 +63,19 @@ def find_h3_dataset() -> Path:
         )
 
         required = [
-            root
-            / "models"
-            / "diffusion_models"
+            root / "models" / "diffusion_models"
             / "minimax_h3_ref2va_pruned-Q4_K_M.gguf",
 
-            root
-            / "models"
-            / "text_encoders"
+            root / "models" / "text_encoders"
             / "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
 
-            root
-            / "models"
-            / "text_encoders"
+            root / "models" / "text_encoders"
             / "Qwen3-VL-32B-Instruct-MiniMax-H3-L0-49-mmproj-BF16.gguf",
 
-            root
-            / "models"
-            / "vae"
+            root / "models" / "vae"
             / "minimax_h3_video_vae_fp16.safetensors",
 
-            root
-            / "models"
-            / "vae"
+            root / "models" / "vae"
             / "minimax_h3_audio_vae_fp32.safetensors",
         ]
 
@@ -101,7 +86,7 @@ def find_h3_dataset() -> Path:
             return root
 
     raise FileNotFoundError(
-        "Complete MiniMax H3 Ref2VA Q4 dataset "
+        "Complete MiniMax H3 Ref2VA dataset "
         "was not found under /kaggle/input."
     )
 
@@ -122,8 +107,8 @@ def link(
     )
 
     if (
-        destination.is_symlink()
-        or destination.exists()
+        destination.exists()
+        or destination.is_symlink()
     ):
         destination.unlink()
 
@@ -132,88 +117,25 @@ def link(
     )
 
     print(
-        "LINK:",
+        "LINKED:",
         destination,
-        "->",
-        source,
-    )
-
-
-def install_models(
-    dataset_root: Path,
-) -> None:
-
-    models = (
-        dataset_root
-        / "models"
-    )
-
-    link(
-        models
-        / "diffusion_models"
-        / "minimax_h3_ref2va_pruned-Q4_K_M.gguf",
-        COMFY_ROOT
-        / "models"
-        / "diffusion_models"
-        / "minimax_h3_ref2va_pruned-Q4_K_M.gguf",
-    )
-
-    link(
-        models
-        / "text_encoders"
-        / "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
-        COMFY_ROOT
-        / "models"
-        / "text_encoders"
-        / "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
-    )
-
-    link(
-        models
-        / "text_encoders"
-        / "Qwen3-VL-32B-Instruct-MiniMax-H3-L0-49-mmproj-BF16.gguf",
-        COMFY_ROOT
-        / "models"
-        / "text_encoders"
-        / "Qwen3-VL-32B-Instruct-MiniMax-H3-L0-49-mmproj-BF16.gguf",
-    )
-
-    link(
-        models
-        / "vae"
-        / "minimax_h3_video_vae_fp16.safetensors",
-        COMFY_ROOT
-        / "models"
-        / "vae"
-        / "minimax_h3_video_vae_fp16.safetensors",
-    )
-
-    link(
-        models
-        / "vae"
-        / "minimax_h3_audio_vae_fp32.safetensors",
-        COMFY_ROOT
-        / "models"
-        / "vae"
-        / "minimax_h3_audio_vae_fp32.safetensors",
     )
 
 
 def main():
 
-    COMFY_ROOT.mkdir(
+    COMFY.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     if not (
-        COMFY_ROOT
-        / "main.py"
-    ).exists():
+        COMFY / "main.py"
+    ).is_file():
 
         clone(
             "https://github.com/comfyanonymous/ComfyUI.git",
-            COMFY_ROOT,
+            COMFY,
         )
 
     run(
@@ -224,44 +146,70 @@ def main():
         "-q",
         "-r",
         str(
-            COMFY_ROOT
-            / "requirements.txt"
+            COMFY / "requirements.txt"
         ),
     )
 
-    CUSTOM_ROOT.mkdir(
+    CUSTOM.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     clone(
         "https://github.com/city96/ComfyUI-GGUF.git",
-        CUSTOM_ROOT
-        / "ComfyUI-GGUF",
+        CUSTOM / "ComfyUI-GGUF",
     )
 
     clone(
         "https://github.com/jlucasmcrell/ComfyUI-H3-Multishot.git",
-        CUSTOM_ROOT
-        / "ComfyUI-H3-Multishot",
+        CUSTOM / "ComfyUI-H3-Multishot",
     )
 
     clone(
         "https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git",
-        CUSTOM_ROOT
-        / "ComfyUI-VideoHelperSuite",
+        CUSTOM / "ComfyUI-VideoHelperSuite",
     )
 
-    dataset = (
-        find_h3_dataset()
+    dataset = find_dataset()
+    models = dataset / "models"
+
+    link(
+        models / "diffusion_models"
+        / "minimax_h3_ref2va_pruned-Q4_K_M.gguf",
+        COMFY / "models" / "diffusion_models"
+        / "minimax_h3_ref2va_pruned-Q4_K_M.gguf",
     )
 
-    install_models(
-        dataset
+    link(
+        models / "text_encoders"
+        / "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+        COMFY / "models" / "text_encoders"
+        / "qwen3vl_32b_minimax_h3-Q4_K_M.gguf",
+    )
+
+    link(
+        models / "text_encoders"
+        / "Qwen3-VL-32B-Instruct-MiniMax-H3-L0-49-mmproj-BF16.gguf",
+        COMFY / "models" / "text_encoders"
+        / "Qwen3-VL-32B-Instruct-MiniMax-H3-L0-49-mmproj-BF16.gguf",
+    )
+
+    link(
+        models / "vae"
+        / "minimax_h3_video_vae_fp16.safetensors",
+        COMFY / "models" / "vae"
+        / "minimax_h3_video_vae_fp16.safetensors",
+    )
+
+    link(
+        models / "vae"
+        / "minimax_h3_audio_vae_fp32.safetensors",
+        COMFY / "models" / "vae"
+        / "minimax_h3_audio_vae_fp32.safetensors",
     )
 
     print(
-        "\nH3 bootstrap complete."
+        "\nMiniMax H3 bootstrap complete."
     )
 
 
