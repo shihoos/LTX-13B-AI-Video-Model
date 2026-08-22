@@ -3,175 +3,63 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from execution.comfy_client import ComfyClient
-from execution.shot_executor import ShotExecutor
+from execution.shot_executor import (
+    ShotExecutor,
+)
 
 
 class ProductionRunner:
-    """
-    H3-only production runner.
-
-    Shots are grouped by scene because H3's memory sampler keeps one stable
-    reference bank and one reference-video lane across a chain. Different
-    scenes can therefore use different casts/references safely.
-    """
 
     def __init__(
         self,
         project_root: Path,
-        gpu_urls: dict[int, str],
+        comfy_client,
     ):
-        self.project_root = Path(project_root)
-        self.gpu_urls = {
-            int(k): str(v).rstrip("/")
-            for k, v in gpu_urls.items()
-        }
-        if not self.gpu_urls:
-            raise ValueError("At least one H3 ComfyUI worker is required.")
+        self.project_root = (
+            Path(project_root)
+        )
 
-        self.client = ComfyClient(
-            base_url=self.gpu_urls[sorted(self.gpu_urls)[0]]
+        self.client = (
+            comfy_client
         )
 
         self.comfy_input_dir = (
-            self.project_root / "ComfyUI" / "input"
+            self.project_root
+            / "ComfyUI"
+            / "input"
         )
+
         self.output_dir = (
-            self.project_root / "data" / "production" / "h3"
-        )
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-    @staticmethod
-    def _ffmpeg_scale(
-        source: Path,
-        destination: Path,
-        width: int = 1280,
-        height: int = 720,
-    ) -> Path:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-
-        command = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(source),
-            "-vf",
-            (
-                f"scale={width}:{height}:"
-                "flags=lanczos,"
-                "setsar=1"
-            ),
-            "-c:v",
-            "libx264",
-            "-preset",
-            "medium",
-            "-crf",
-            "16",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-movflags",
-            "+faststart",
-            str(destination),
-        ]
-
-        completed = subprocess.run(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-        if completed.returncode != 0:
-            raise RuntimeError(
-                "FFmpeg 720p export failed:\n"
-                + completed.stderr[-4000:]
-            )
-
-        return destination
-
-    def _object_info(self) -> dict:
-        info = self.client.get_object_info()
-
-        required = [
-            "H3ModelLoaderAny",
-            "H3ClipLoaderAny",
-            "H3MultishotMemorySampler",
-            "H3ReferenceAudio",
-        ]
-
-        missing = [
-            name
-            for name in required
-            if name not in info
-        ]
-
-        if missing:
-            raise RuntimeError(
-                "H3 runtime is incomplete. Missing nodes:\n- "
-                + "\n- ".join(missing)
-            )
-
-        return info
-
-    def run(self, production_plan: dict) -> Path:
-        if not self.client.health_check():
-            raise RuntimeError(
-                f"Cannot connect to H3 ComfyUI: {self.client.base_url}"
-            )
-
-        object_info = self._object_info()
-
-        shots = production_plan.get("shots") or []
-        if not shots:
-            raise ValueError("Production plan has no shots.")
-
-        scenes: dict[str, list[dict]] = {}
-        for shot in shots:
-            scenes.setdefault(
-                str(shot["scene_id"]),
-                []
-            ).append(shot)
-
-        executor = ShotExecutor(
-            comfy_client=self.client,
-            project_root=self.project_root,
-            comfy_input_dir=self.comfy_input_dir,
-        )
-
-        scene_outputs: list[Path] = []
-
-        for scene_id, scene_shots in scenes.items():
-            print(f"\n=== H3 SCENE: {scene_id} ===")
-            output = executor.execute_scene(
-                scene_id=scene_id,
-                shots=scene_shots,
-                object_info=object_info,
-                output_dir=self.output_dir,
-            )
-
-            final = self.output_dir / f"{scene_id}_720p.mp4"
-            self._ffmpeg_scale(output, final)
-            scene_outputs.append(final)
-
-        if len(scene_outputs) == 1:
-            return scene_outputs[0]
-
-        concat_file = self.output_dir / "concat.txt"
-        concat_file.write_text(
-            "\n".join(
-                f"file '{path.resolve()}'"
-                for path in scene_outputs
-            ) + "\n",
-            encoding="utf-8",
-        )
-
-        final = (
             self.project_root
             / "data"
             / "production"
-            / "final_h3_720p.mp4"
+            / "h3"
+        )
+
+        self.output_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+    @staticmethod
+    def _concat(
+        files: list[Path],
+        destination: Path,
+    ) -> Path:
+
+        manifest = (
+            destination.with_suffix(
+                ".txt"
+            )
+        )
+
+        manifest.write_text(
+            "\n".join(
+                f"file '{path.resolve()}'"
+                for path in files
+            )
+            + "\n",
+            encoding="utf-8",
         )
 
         command = [
@@ -182,23 +70,193 @@ class ProductionRunner:
             "-safe",
             "0",
             "-i",
-            str(concat_file),
-            "-c",
-            "copy",
-            str(final),
+            str(manifest),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "17",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(destination),
         ]
 
-        completed = subprocess.run(
+        result = subprocess.run(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
 
-        if completed.returncode != 0:
+        manifest.unlink(
+            missing_ok=True
+        )
+
+        if result.returncode != 0:
             raise RuntimeError(
-                "FFmpeg scene assembly failed:\n"
-                + completed.stderr[-4000:]
+                "FFmpeg assembly failed:\n"
+                + result.stderr[-4000:]
             )
 
-        return final
+        return destination
+
+    @staticmethod
+    def _deliver_720p(
+        source: Path,
+        destination: Path,
+    ) -> Path:
+
+        command = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(source),
+            "-vf",
+            (
+                "scale=1280:720:"
+                "flags=lanczos,"
+                "setsar=1"
+            ),
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "17",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            str(destination),
+        ]
+
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                "720p delivery failed:\n"
+                + result.stderr[-4000:]
+            )
+
+        return destination
+
+    def run(
+        self,
+        production_plan: dict,
+    ) -> Path:
+
+        if not self.client.health_check():
+            raise RuntimeError(
+                "Cannot connect to ComfyUI at "
+                f"{self.client.base_url}"
+            )
+
+        shots = production_plan.get(
+            "shots",
+            [],
+        )
+
+        if not shots:
+            raise ValueError(
+                "Production plan contains no shots."
+            )
+
+        executor = (
+            ShotExecutor(
+                comfy_client=self.client,
+                project_root=self.project_root,
+                comfy_input_dir=(
+                    self.comfy_input_dir
+                ),
+            )
+        )
+
+        scene_outputs = {}
+
+        for shot in shots:
+            scene_id = shot[
+                "scene_id"
+            ]
+
+            print(
+                f"Generating "
+                f"{shot['shot_id']} "
+                f"with existing H3 workflow..."
+            )
+
+            video = executor.execute(
+                shot,
+                self.output_dir,
+            )
+
+            scene_outputs.setdefault(
+                scene_id,
+                [],
+            ).append(
+                video
+            )
+
+        mastered_scenes = []
+
+        for scene_id, files in (
+            scene_outputs.items()
+        ):
+            if len(files) == 1:
+                master = files[0]
+            else:
+                master = (
+                    self.output_dir
+                    / f"{scene_id}_master.mp4"
+                )
+
+                self._concat(
+                    files,
+                    master,
+                )
+
+            mastered_scenes.append(
+                master
+            )
+
+        if len(
+            mastered_scenes
+        ) == 1:
+            master = mastered_scenes[0]
+        else:
+            master = (
+                self.output_dir
+                / "h3_master.mp4"
+            )
+
+            self._concat(
+                mastered_scenes,
+                master,
+            )
+
+        final = (
+            self.project_root
+            / "data"
+            / "production"
+            / "final_h3_720p.mp4"
+        )
+
+        return self._deliver_720p(
+            master,
+            final,
+        )
