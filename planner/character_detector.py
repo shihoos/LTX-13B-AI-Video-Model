@@ -1,17 +1,17 @@
+from __future__ import annotations
+
 import re
+from pathlib import Path
 
 from pipeline.reference_manager import (
     ReferenceManager,
 )
-
-from planner.qwen_loader import (
-    QwenStoryModel,
-)
-
 from planner.config import (
     QWEN_CHARACTER_DETECTION_TEMPERATURE,
 )
-
+from planner.qwen_loader import (
+    QwenStoryModel,
+)
 from schemas.parser import (
     extract_json,
 )
@@ -19,44 +19,50 @@ from schemas.parser import (
 
 class CharacterDetector:
 
-    """
-    Detect important named characters.
-
-    Explicit names corresponding to provided character assets
-    are authoritative when they appear in the original request
-    or generated story.
-    """
-
     def __init__(
         self,
         model=None,
     ):
-
         self.model = (
             model
             if model is not None
             else QwenStoryModel()
         )
 
-        self.references = (
-            ReferenceManager()
+        self.project_root = (
+            Path(__file__)
+            .resolve()
+            .parents[1]
         )
+
+        self.references = (
+            ReferenceManager(
+                self.project_root
+            )
+        )
+
+    @staticmethod
+    def _normalise(
+        value: str,
+    ) -> str:
+        return re.sub(
+            r"[^a-z0-9]+",
+            " ",
+            value.lower(),
+        ).strip()
 
     def _explicit_asset_names(
         self,
         text: str,
     ) -> list[str]:
-
         if not text:
-
             return []
 
-        names = []
+        result = []
 
         for asset_name in (
             self.references.character_asset_names()
         ):
-
             pattern = (
                 r"(?<!\w)"
                 + re.escape(asset_name)
@@ -68,18 +74,20 @@ class CharacterDetector:
                 text,
                 flags=re.IGNORECASE,
             ):
-
-                names.append(
+                result.append(
                     asset_name
                 )
 
-        return names
+        return result
 
     def detect(
         self,
         story: str,
         original_request: str = "",
     ) -> list[str]:
+
+        if not story or not story.strip():
+            return []
 
         messages = [
             {
@@ -92,30 +100,16 @@ class CharacterDetector:
             {
                 "role": "user",
                 "content": (
-                    "Identify the important named "
-                    "characters that require a "
-                    "consistent visual identity.\n\n"
-
-                    "Preserve character names exactly "
-                    "as written.\n\n"
-
-                    "Do not rename, translate, expand, "
-                    "or replace explicit character names.\n\n"
-
-                    "Do not include unnamed crowds, "
-                    "background people, generic roles, "
-                    "or temporary extras unless they "
-                    "are important recurring characters.\n\n"
-
-                    "Return exactly this structure:\n\n"
-
+                    "Identify the important named characters "
+                    "that require a consistent visual identity.\n\n"
+                    "Preserve explicit character names exactly.\n"
+                    "Do not rename, translate or replace names.\n"
+                    "Do not include generic crowds or temporary extras.\n\n"
+                    "Return exactly:\n"
                     "{\n"
-                    '  "characters": [\n'
-                    '    "Character Name"\n'
-                    "  ]\n"
+                    '  "characters": ["Character Name"]\n'
                     "}\n\n"
-
-                    "Story:\n"
+                    "STORY:\n"
                     f"{story}"
                 ),
             },
@@ -141,7 +135,6 @@ class CharacterDetector:
             names,
             list,
         ):
-
             names = []
 
         explicit_names = []
@@ -150,95 +143,60 @@ class CharacterDetector:
             original_request,
             story,
         ):
-
-            for name in (
-                self._explicit_asset_names(
-                    text
-                )
+            for name in self._explicit_asset_names(
+                text
             ):
-
                 if name.lower() not in {
                     item.lower()
-                    for item
-                    in explicit_names
+                    for item in explicit_names
                 }:
-
                     explicit_names.append(
                         name
                     )
 
         result = []
-
         seen = set()
 
         for name in explicit_names:
-
             key = name.lower()
 
             if key not in seen:
+                seen.add(key)
+                result.append(name)
 
-                seen.add(
-                    key
-                )
-
-                result.append(
-                    name
-                )
-
-        explicit_normalized = {
-            re.sub(
-                r"[^a-z0-9]+",
-                " ",
-                name.lower(),
-            ).strip()
-            for name
-            in explicit_names
+        explicit_normalised = {
+            self._normalise(name)
+            for name in explicit_names
         }
 
         for name in names:
-
             if not isinstance(
                 name,
                 str,
             ):
-
                 continue
 
             name = name.strip()
 
             if not name:
-
                 continue
 
             key = name.lower()
 
             if key in seen:
-
                 continue
 
-            normalized = re.sub(
-                r"[^a-z0-9]+",
-                " ",
-                name.lower(),
-            ).strip()
-
-            if (
-                normalized
-                in explicit_normalized
-            ):
-
-                continue
-
-            seen.add(
-                key
-            )
-
-            result.append(
+            normalised = self._normalise(
                 name
             )
+
+            if normalised in explicit_normalised:
+                continue
+
+            seen.add(key)
+            result.append(name)
 
         return result
 
     def unload(self):
-
         self.model.unload()
