@@ -232,7 +232,21 @@ class ComfyClient:
             )
 
         return result
+        
+    def supports_workflow_conversion(self) -> bool:
+         try:
+             info = self.get_object_info()
+         except Exception:
+             return False
 
+         return (
+              "WorkflowToApi"
+               in info
+               or "WorkflowToAPI"
+               in info
+    )
+    
+    
     def convert_workflow(
         self,
         workflow: dict,
